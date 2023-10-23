@@ -1,9 +1,9 @@
 /*
    @title     StarMod
    @file      AppLedsV.h
-   @date      20230730
-   @repo      https://github.com/ewoudwijma/StarMod
-   @Authors   https://github.com/ewoudwijma/StarMod/commits/main
+   @date      20231016
+   @repo      https://github.com/ewowi/StarMod
+   @Authors   https://github.com/ewowi/StarMod/commits/main
    @Copyright (c) 2023 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 */
@@ -12,8 +12,7 @@
 #include <vector>
 #include "ArduinoJson.h"
 
-#define NUM_LEDS_FastLed 1024
-#define NUM_LEDS_Preview 4096
+#define NUM_LEDS_Preview 8192
 
 //keep them global for the time being as FastLed effects refer to them and want to keep that code as unchanged as possible
 //(so maybe move there?)
@@ -26,14 +25,22 @@ enum Projections
 {
   p_None,
   p_Random,
-  p_DistanceFromPoint
+  p_DistanceFromPoint,
+  p_DistanceFromCentre,
+  count
+};
+
+struct Coordinate {
+  uint16_t x;
+  uint16_t y;
+  uint16_t z;
 };
 
 class LedsV {
 
 public:
   // CRGB *leds = nullptr;
-  CRGB ledsP[NUM_LEDS_Preview];
+  CRGB ledsPhysical[NUM_LEDS_Preview];
     // if (!leds)
   //   leds = (CRGB*)calloc(nrOfLeds, sizeof(CRGB));
   // else
@@ -58,7 +65,7 @@ public:
 
   void ledFixProjectAndMap();
 
-  uint16_t indexVLocal = 0;
+  uint16_t indexVLocal = 0; //set in operator[], used by operator=
 
   // ledsV[indexV] stores indexV locally
   LedsV& operator[](uint16_t indexV);
@@ -94,10 +101,11 @@ public:
 
 private:
   //need to make these static as they are called in lambda functions
-  static std::vector<std::vector<uint16_t>> mappingTable; //not customMappingTable, just MappingTable
+  static std::vector<std::vector<uint16_t>> mappingTable;
   static uint16_t mappingTableLedCounter;
 };
 
+//Global vars!
 //after header split they all needs to be static otherwise multiple definition link error
 static LedsV ledsV = LedsV(); //virtual leds
-static CRGB *ledsP = ledsV.ledsP; //physical leds, used by FastLed in particular
+static CRGB *ledsP = ledsV.ledsPhysical; //physical leds, used by FastLed in particular

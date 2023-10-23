@@ -1,8 +1,8 @@
 <!-- @title     StarMod
 @file      index.htm
-@date      20230730
-@repo      https://github.com/ewoudwijma/StarMod
-@Authors   https://github.com/ewoudwijma/StarMod/commits/main
+@date      20231016
+@repo      https://github.com/ewowi/StarMod
+@Authors   https://github.com/ewowi/StarMod/commits/main
 @Copyright (c) 2023 Github StarMod Commit Authors
 @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007 -->
 
@@ -14,19 +14,30 @@
   <link rel="stylesheet" href="index.css">
   <script src="app.js"></script>
   <script src="index.js"></script>
-  <!-- https://www.foxy.io/blog/faster-pageloads-effectively-using-http-caching-cache-busting-and-a-cdn/ -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" max-age=86400></script>
+
+   <!-- tbd: add max-age=86400 to imports -->
+ 
+  <!-- https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules -->
+  <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.156.1/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.156.1/examples/jsm/"
+      }
+    }
+  </script>
 </head>
 <body onload="onLoad()">
-  <h1>StarMod by MoonModules</h1>
+  <h1>StarMod by MoonModules 💫 <div id="instanceName"></div></h1>
   <div class="container">
-    <div id="column0" class = "column">
+    <div id="screenColumn0" class = "screenColumn">
     </div>
-    <div id="column1" class = "column">
+    <div id="screenColumn1" class = "screenColumn">
     </div>
-    <div id="column2" class = "column">
+    <div id="screenColumn2" class = "screenColumn">
     </div>
-    <div id="column3" class = "column">
+    <div id="screenColumn3" class = "screenColumn">
     </div>
   </div>
   <div id="connind">&#9790;</div>

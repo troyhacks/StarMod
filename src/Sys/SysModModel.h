@@ -1,9 +1,9 @@
 /*
    @title     StarMod
    @file      SysModModel.h
-   @date      20230730
-   @repo      https://github.com/ewoudwijma/StarMod
-   @Authors   https://github.com/ewoudwijma/StarMod/commits/main
+   @date      20231016
+   @repo      https://github.com/ewowi/StarMod
+   @Authors   https://github.com/ewowi/StarMod/commits/main
    @Copyright (c) 2023 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
  */
@@ -31,16 +31,19 @@ public:
   static JsonObject setValueC(const char * id, const char * value);
 
   //setValue int
-  static JsonObject setValueI(const char * id, int value);
+  static JsonObject setValueI(const char * id, int value, uint8_t rowNr=-1);
 
   //setValue bool
-  static JsonObject setValueB(const char * id, bool value);
+  static JsonObject setValueB(const char * id, bool value, uint8_t rowNr=-1);
 
   //Set value with argument list
   static JsonObject setValueV(const char * id, const char * format, ...); //static to use in *Fun
 
   //Set value with argument list and print
   JsonObject setValueP(const char * id, const char * format, ...);
+
+  //Send value directly to ws (tbd: no model function but web?)
+  void setValueLossy(const char * id, const char * format, ...);
 
   //tbd
   // template <typename Type>

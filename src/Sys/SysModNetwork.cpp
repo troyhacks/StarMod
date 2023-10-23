@@ -1,9 +1,9 @@
 /*
    @title     StarMod
    @file      SysModNetwork.cpp
-   @date      20230730
-   @repo      https://github.com/ewoudwijma/StarMod
-   @Authors   https://github.com/ewoudwijma/StarMod/commits/main
+   @date      20231016
+   @repo      https://github.com/ewowi/StarMod
+   @Authors   https://github.com/ewowi/StarMod/commits/main
    @Copyright (c) 2023 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
  */
@@ -27,11 +27,11 @@ SysModNetwork::SysModNetwork() :Module("Network") {};
 //setup wifi an async webserver
 void SysModNetwork::setup() {
   Module::setup();
-  print->print("%s %s\n", __PRETTY_FUNCTION__, name);
+  USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
   parentVar = ui->initModule(parentVar, name);
-  ui->initText(parentVar, "ssid", "", false);
-  ui->initPassword(parentVar, "pw", "", false, [](JsonObject var) { //uiFun
+  ui->initText(parentVar, "ssid", "", 32, false);
+  ui->initPassword(parentVar, "pw", "", 32, false, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Password");
   });
   ui->initButton(parentVar, "connect", nullptr, false, [](JsonObject var) {
@@ -39,27 +39,36 @@ void SysModNetwork::setup() {
   }, [](JsonObject var) {
     forceReconnect = true;
   });
-  ui->initText(parentVar, "nwstatus", nullptr, true, [](JsonObject var) { //uiFun
+  ui->initText(parentVar, "nwstatus", nullptr, 32, true, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Status");
   });
+  ui->initText(parentVar, "rssi", nullptr, 32, true, [](JsonObject var) { //uiFun
+    web->addResponse(var["id"], "label", "Wifi signal");
+  });
 
-  print->print("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
+  USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
 }
 
 void SysModNetwork::loop() {
   // Module::loop();
+  if (millis() - secondMillis >= 1000) {
+    secondMillis = millis();
+
+    mdl->setValueLossy("rssi", "%d dBm", WiFi.RSSI());
+  }
+
   handleConnection();
 }
 
 void SysModNetwork::handleConnection() {
   if (lastReconnectAttempt == 0) { // do this only once
-    print->print("lastReconnectAttempt == 0\n");
+    USER_PRINTF("lastReconnectAttempt == 0\n");
     initConnection();
     return;
   }
 
   if (forceReconnect) {
-    print->print("Forcing reconnect.");
+    USER_PRINTF("Forcing reconnect.");
     initConnection();
     interfacesInited = false;
     forceReconnect = false;
@@ -68,13 +77,13 @@ void SysModNetwork::handleConnection() {
   }
   if (!(WiFi.localIP()[0] != 0 && WiFi.status() == WL_CONNECTED)) { //!Network.interfacesInited()
     if (interfacesInited) {
-      print->print("Disconnected!\n");
+      USER_PRINTF("Disconnected!\n");
       interfacesInited = false;
       initConnection();
     }
 
     if (!apActive && millis() - lastReconnectAttempt > 12000 ) { //&& (!wasConnected || apBehavior == AP_BEHAVIOR_NO_CONN)
-      print->print("Not connected AP.\n");
+      USER_PRINTF("Not connected AP.\n");
       initAP();
     }
   } else if (!interfacesInited) { //newly connected
@@ -82,14 +91,14 @@ void SysModNetwork::handleConnection() {
 
     interfacesInited = true;
 
-    Modules::newConnection = true; // send all modules connect notification
+    SysModModules::newConnection = true; // send all modules connect notification
 
     // shut down AP
     if (apActive) { //apBehavior != AP_BEHAVIOR_ALWAYS
       dnsServer.stop();
       WiFi.softAPdisconnect(true);
       apActive = false;
-      print->println(F("Access point disabled (handle)."));
+      USER_PRINTF("Access point disabled (handle).\n");
     }
   }
 }
@@ -103,7 +112,7 @@ void SysModNetwork::initConnection() {
   lastReconnectAttempt = millis();
 
   if (!apActive) {
-    print->print("Access point disabled (init).\n");
+    USER_PRINTF("Access point disabled (init).\n");
     WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_STA);
   }
@@ -114,24 +123,24 @@ void SysModNetwork::initConnection() {
   const char * ssid = mdl->getValue("ssid");
   const char * password = mdl->getValue("pw");
   if (ssid && strlen(ssid)>0) {
-    char passXXX [20] = "";
-    for (int i = 0; i < strlen(password); i++) strcat(passXXX, "*");
-    print->print("Connecting to WiFi %s / %s\n", ssid, passXXX);
+    char passXXX [32] = "";
+    for (int i = 0; i < strlen(password); i++) strncat(passXXX, "*", sizeof(passXXX)-1);
+    USER_PRINTF("Connecting to WiFi %s / %s\n", ssid, passXXX);
     WiFi.begin(ssid, password);
   }
   else
-    print->print("No SSID");
+    USER_PRINTF("No SSID");
 }
 
 void SysModNetwork::initAP() {
-  print->print("Opening access point %s\n", apSSID);
+  USER_PRINTF("Opening access point %s\n", apSSID);
   WiFi.softAPConfig(IPAddress(4, 3, 2, 1), IPAddress(4, 3, 2, 1), IPAddress(255, 255, 255, 0));
   WiFi.softAP(apSSID, apPass, apChannel, apHide);
   if (!apActive) // start captive portal if AP active
   {
     mdl->setValueP("nwstatus", "AP %s / %s @ %s", apSSID, apPass, WiFi.softAPIP().toString().c_str());
 
-    Modules::newConnection = true; // send all modules connect notification
+    SysModModules::newConnection = true; // send all modules connect notification
 
     dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
     dnsServer.start(53, "*", WiFi.softAPIP());

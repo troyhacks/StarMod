@@ -1,9 +1,9 @@
 /*
    @title     StarMod
    @file      SysModPrint.h
-   @date      20230730
-   @repo      https://github.com/ewoudwijma/StarMod
-   @Authors   https://github.com/ewoudwijma/StarMod/commits/main
+   @date      20231016
+   @repo      https://github.com/ewowi/StarMod
+   @Authors   https://github.com/ewowi/StarMod/commits/main
    @Copyright (c) 2023 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 */
@@ -15,18 +15,18 @@
 #include "SysModWeb.h"
 
 SysModPrint::SysModPrint() :Module("Print") {
-  print("%s %s\n", __PRETTY_FUNCTION__, name);
+  // print("%s %s\n", __PRETTY_FUNCTION__, name);
 
   Serial.begin(115200);
   delay(5000); //if (!Serial) doesn't seem to work, check with SoftHack007
 
-  print("%s %s %s\n",__PRETTY_FUNCTION__,name, success?"success":"failed");
+  // print("%s %s %s\n",__PRETTY_FUNCTION__,name, success?"success":"failed");
 };
 
 void SysModPrint::setup() {
   Module::setup();
 
-  print("%s %s\n", __PRETTY_FUNCTION__, name);
+  // print("%s %s\n", __PRETTY_FUNCTION__, name);
 
   parentVar = ui->initModule(parentVar, name);
 
@@ -46,7 +46,7 @@ void SysModPrint::setup() {
     web->addResponse(var["id"], "comment", "Show the printed log");
   });
 
-  print("%s %s %s\n",__PRETTY_FUNCTION__,name, success?"success":"failed");
+  // print("%s %s %s\n",__PRETTY_FUNCTION__,name, success?"success":"failed");
 }
 
 void SysModPrint::loop() {
@@ -56,17 +56,49 @@ void SysModPrint::loop() {
 
 size_t SysModPrint::print(const char * format, ...) {
   va_list args;
+
   va_start(args, format);
 
-  size_t len = vprintf(format, args);
+  for (size_t i = 0; i < strlen(format); i++) 
+  {
+    if (format[i] == '%') 
+    {
+      switch (format[i+1]) 
+      {
+        case 's':
+          Serial.print(va_arg(args, const char *));
+          break;
+        case 'u':
+          Serial.print(va_arg(args, unsigned int));
+          break;
+        case 'c':
+          Serial.print(va_arg(args, int));
+          break;
+        case 'd':
+          Serial.print(va_arg(args, int));
+          break;
+        case 'f':
+          Serial.print(va_arg(args, double));
+          break;
+        case '%':
+          Serial.print("%"); // in case of %%
+          break;
+        default:
+          va_arg(args, int);
+        // logFile.print(x);
+          Serial.print(format[i]);
+          Serial.print(format[i+1]);
+      }
+      i++;
+    } 
+    else 
+    {
+      Serial.print(format[i]);
+    }
+  }
 
   va_end(args);
-  
-  // if (setupsDone) mdl->setValueI("log", (int)millis()/1000);
-  //this function looks very sensitive, any chance causes crashes!
-  //reason could (very well...) be that setValue also issues print commands...
-
-  return len;
+  return 1;
 }
 
 size_t SysModPrint::println(const __FlashStringHelper * x) {
@@ -88,20 +120,19 @@ size_t SysModPrint::printJson(const char * text, JsonVariantConst source) {
   return size;
 }
 
-char * SysModPrint::fFormat(const char * format, ...) {
-  static char msgbuf[32];
-
+size_t SysModPrint::fFormat(char * buf, size_t size, const char * format, ...) {
   va_list args;
   va_start(args, format);
 
-  size_t len = snprintf(msgbuf, sizeof(msgbuf), format, args);
+  size_t len = vsnprintf(buf, size, format, args);
 
   va_end(args);
 
-  return msgbuf;
+  // Serial.printf("fFormat %s (%d)\n", buf, size);
+
+  return len;
 }
 
 void SysModPrint::printJDocInfo(const char * text, DynamicJsonDocument source) {
   print("%s  %u / %u (%u%%) (%u %u %u)\n", text, source.memoryUsage(), source.capacity(), 100 * source.memoryUsage() / source.capacity(), source.size(), source.overflowed(), source.nesting());
 }
-

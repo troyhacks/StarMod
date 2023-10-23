@@ -1,9 +1,9 @@
 /*
    @title     StarMod
    @file      SysModFiles.cpp
-   @date      20230730
-   @repo      https://github.com/ewoudwijma/StarMod
-   @Authors   https://github.com/ewoudwijma/StarMod/commits/main
+   @date      20231016
+   @repo      https://github.com/ewowi/StarMod
+   @Authors   https://github.com/ewowi/StarMod/commits/main
    @Copyright (c) 2023 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
  */
@@ -19,15 +19,15 @@
 bool SysModFiles::filesChanged = false;
 
 SysModFiles::SysModFiles() :Module("Files") {
-  print->print("%s %s\n", __PRETTY_FUNCTION__, name);
+  USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
   if (!LittleFS.begin(true)) { //true: formatOnFail
-    print->print(" An Error has occurred while mounting File system");
-    print->print(" fail\n");
+    USER_PRINTF(" An Error has occurred while mounting File system");
+    USER_PRINTF(" fail\n");
     success = false;
   }
 
-  print->print("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
+  USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
 };
 
 //setup filesystem
@@ -35,31 +35,49 @@ void SysModFiles::setup() {
   Module::setup();
   parentVar = ui->initModule(parentVar, name);
 
-  JsonObject tableVar = ui->initTable(parentVar, "flist", nullptr, false, [](JsonObject var) { //uiFun
+  JsonObject tableVar = ui->initTable(parentVar, "fileTbl", nullptr, false, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Files");
     web->addResponse(var["id"], "comment", "List of files");
     JsonArray rows = web->addResponseA(var["id"], "table");
     dirToJson(rows);
+
   });
-  ui->initText(tableVar, "flName", nullptr, true, [](JsonObject var) { //uiFun
+  ui->initText(tableVar, "flName", nullptr, 32, true, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Name");
   });
-  ui->initText(tableVar, "flSize", nullptr, true, [](JsonObject var) { //uiFun
+  ui->initNumber(tableVar, "flSize", -1, 0, (uint16_t)-1, true, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Size (B)");
   });
+  ui->initURL(tableVar, "flLink", nullptr, true, [](JsonObject var) { //uiFun
+    web->addResponse(var["id"], "label", "Show");
+  });
+  ui->initButton(tableVar, "flDel", "⌫", false, [](JsonObject var) { //uiFun
+    web->addResponse(var["id"], "label", "Delete"); //table header title
+  }, [](JsonObject var) { //chFun
+    print->printJson("chFun", var); //not called yet for buttons...
+    //instead:
+    // processJson k:flDel r:6 (⌫ == ⌫ ? 1)
+    // we want an array for value but :  {"id":"flDel","type":"button","ro":false,"o":23,"uiFun":25,"chFun":26,"value":"⌫"}
+  });
 
-  ui->initText(parentVar, "drsize", nullptr, true, [](JsonObject var) { //uiFun
+  ui->initText(parentVar, "drsize", nullptr, 32, true, [](JsonObject var) { //uiFun
+    char details[32] = "";
+    print->fFormat(details, sizeof(details)-1, "%d / %d B", files->usedBytes(), files->totalBytes());
+    web->addResponse(var["id"], "value", details);
     web->addResponse(var["id"], "label", "Total FS size");
   });
 
   ui->initButton(parentVar, "deleteFiles", nullptr, false, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "comment", "All but model.json");
   }, [](JsonObject var) {
-    print->print("delete files\n");
+    USER_PRINTF("delete files\n");
     files->removeFiles("model.json", true); //all but model.json
   });
 
+  // ui->initURL(parentVar, "urlTest", "file/3DCube202005.json", true);
+
   web->addUpload("/upload");
+  web->addUpdate("/update");
 
   web->addFileServer("/file");
 
@@ -68,23 +86,22 @@ void SysModFiles::setup() {
 void SysModFiles::loop(){
   // Module::loop();
 
-  if (millis() - secondMillis >= 1000 || !secondMillis) {
-    secondMillis = millis();
+  // if (millis() - secondMillis >= 10000) {
+  //   secondMillis = millis();
+  //       // if something changed in fileTbl
+  // }
 
-    mdl->setValueV("drsize", "%d / %d B", usedBytes(), totalBytes());
+  if (filesChanged) {
+    mdl->setValueP("drsize", "%d / %d B", usedBytes(), totalBytes());
+    filesChanged = false;
 
-        // if something changed in clist
-    if (filesChanged) {
-      filesChanged = false;
-
-      ui->processUiFun("flist");
-    }
+    ui->processUiFun("fileTbl");
   }
 }
 
 bool SysModFiles::remove(const char * path) {
   filesChange();
-  print->print("File remove %s\n", path);
+  USER_PRINTF("File remove %s\n", path);
   return LittleFS.remove(path);
 }
 
@@ -115,8 +132,12 @@ void SysModFiles::dirToJson(JsonArray array, bool nameOnly, const char * filter)
         JsonArray row = array.createNestedArray();
         row.add((char *)file.name());  //create a copy!
         row.add(file.size());
+        char urlString[32] = "file/";
+        strncat(urlString, file.name(), sizeof(urlString)-1);
+        row.add((char *)urlString);  //create a copy!
+        row.add("⌫");  //delete placeholder
       }
-      // Serial.printf("FILE: %s %d\n", file.name(), file.size());
+      // USER_PRINTF("FILE: %s %d\n", file.name(), file.size());
     }
 
     file.close();
@@ -138,10 +159,10 @@ bool SysModFiles::seqNrToName(char * fileName, size_t seqNr) {
   size_t counter = 0;
   while (file) {
     if (counter == seqNr) {
-      Serial.printf("seqNrToName: %s %d\n", file.name(), file.size());
+      USER_PRINTF("seqNrToName: %s %d\n", file.name(), file.size());
       root.close();
-      strcat(fileName, "/"); //add root prefix
-      strcat(fileName, file.name());
+      strncat(fileName, "/", 31); //add root prefix, fileName is 32 bytes but sizeof doesn't know so cheating
+      strncat(fileName, file.name(), 31);
       return true;
     }
 
@@ -158,15 +179,15 @@ bool SysModFiles::readObjectFromFile(const char* path, JsonDocument* dest) {
   // if (doCloseFile) closeFile();
   File f = open(path, "r");
   if (!f) {
-    print->print("File %s open not successful %s\n", path);
+    USER_PRINTF("File %s open not successful\n", path);
     return false;
   }
   else { 
-    print->print(PSTR("File %s open to read, size %d bytes\n"), path, (int)f.size());
+    USER_PRINTF(PSTR("File %s open to read, size %d bytes\n"), path, (int)f.size());
     DeserializationError error = deserializeJson(*dest, f);
     if (error) {
       print->printJDocInfo("readObjectFromFile", *dest);
-      print->print("readObjectFromFile deserializeJson failed with code %s\n", error.c_str());
+      USER_PRINTF("readObjectFromFile deserializeJson failed with code %s\n", error.c_str());
       f.close();
       return false;
     } else {
@@ -180,13 +201,13 @@ bool SysModFiles::readObjectFromFile(const char* path, JsonDocument* dest) {
 // bool SysModFiles::writeObjectToFile(const char* path, JsonDocument* dest) {
 //   File f = open(path, "w");
 //   if (f) {
-//     print->println(F("  success"));
+//     print->println("  success");
 //     serializeJson(*dest, f);
 //     f.close();
 //     filesChange();
 //     return true;
 //   } else {
-//     print->println(F("  fail"));
+//     print->println("  fail");
 //     return false;
 //   }
 // }
@@ -197,8 +218,8 @@ void SysModFiles::removeFiles(const char * filter, bool reverse) {
 
   while (file) {
     if (filter == nullptr || reverse?strstr(file.name(), filter) == nullptr: strstr(file.name(), filter) != nullptr) {
-      char fileName[30] = "/";
-      strcat(fileName, file.name());
+      char fileName[32] = "/";
+      strncat(fileName, file.name(), sizeof(fileName)-1);
       file.close(); //close otherwise not removeable
       remove(fileName);
     }
