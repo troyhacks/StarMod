@@ -9,7 +9,6 @@
 */
 
 #include "SysModSystem.h"
-#include "Module.h"
 #include "SysModPrint.h"
 #include "SysModUI.h"
 #include "SysModWeb.h"
@@ -18,12 +17,10 @@
 // #include <Esp.h>
 #include <rom/rtc.h>
 
-char SysModSystem::version[16] = "";
-
-SysModSystem::SysModSystem() :Module("System") {};
+SysModSystem::SysModSystem() :SysModule("System") {};
 
 void SysModSystem::setup() {
-  Module::setup();
+  SysModule::setup();
   USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
   parentVar = ui->initModule(parentVar, name);
@@ -66,7 +63,7 @@ void SysModSystem::setup() {
   //calculate version in format YYMMDDHH
   //https://forum.arduino.cc/t/can-you-format-__date__/200818/10
   int month, day, year, hour, minute, second;
-  static const char month_names[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  const char month_names[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
   sscanf(__DATE__, "%s %d %d", version, &day, &year); // Oct 20 2023
   month = (strstr(month_names, version)-month_names)/3+1;
   sscanf(__TIME__, "%d:%d:%d", &hour, &minute, &second); //11:20:23
@@ -74,10 +71,7 @@ void SysModSystem::setup() {
 
   USER_PRINTF("version %s %s %s %d:%d:%d\n", version, __DATE__, __TIME__, hour, minute, second);
 
-  ui->initText(parentVar, "version", nullptr, 16, true, [](JsonObject var) { //uiFun
-    mdl->setValueP("version", "%s", version); //make sure ui shows the right version
-    // var["value"] = version;
-  });
+  ui->initText(parentVar, "version", nullptr, 16, true);
   // ui->initText(parentVar, "date", __DATE__, 16, true);
   // ui->initText(parentVar, "time", __TIME__, 16, true);
 
@@ -103,22 +97,21 @@ void SysModSystem::setup() {
 }
 
 void SysModSystem::loop() {
-  // Module::loop();
+  // SysModule::loop();
 
   loopCounter++;
-  if (millis() - secondMillis >= 1000) {
-    secondMillis = millis();
+}
+void SysModSystem::loop1s() {
+  mdl->setValueLossy("upTime", "%lu s", millis()/1000);
+  mdl->setValueLossy("loops", "%lu /s", loopCounter);
 
-    mdl->setValueLossy("upTime", "%lu s", millis()/1000);
-    mdl->setValueLossy("loops", "%lu /s", loopCounter);
-
-    loopCounter = 0;
-  }
-  if (millis() - tenSecondMillis >= 10000) {
-    tenSecondMillis = millis();
-    mdl->setValueLossy("heap", "%d / %d (%d) B", ESP.getFreeHeap(), ESP.getHeapSize(), ESP.getMaxAllocHeap());
-    mdl->setValueLossy("stack", "%d B", uxTaskGetStackHighWaterMark(NULL));
-  }
+  loopCounter = 0;
+}
+void SysModSystem::loop10s() {
+  mdl->setValueC("version", version); //make sure ui shows the right version !!!never do this as it interupts with uiFun sendDataWS!!
+  mdl->setValueLossy("heap", "%d / %d (%d) B", ESP.getFreeHeap(), ESP.getHeapSize(), ESP.getMaxAllocHeap());
+  mdl->setValueLossy("stack", "%d B", uxTaskGetStackHighWaterMark(NULL));
+  USER_PRINTF("❤️"); //heartbeat
 }
 
 //replace code by sentence as soon it occurs, so we know what will happen and what not

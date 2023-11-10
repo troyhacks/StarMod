@@ -1,6 +1,6 @@
 /*
    @title     StarMod
-   @file      Modules.cpp
+   @file      SysModules.cpp
    @date      20231016
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
@@ -8,35 +8,34 @@
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 */
 
-#include "SysModModules.h"
-#include "SysModPrint.h"
-#include "SysModUI.h"
-#include "SysModWeb.h"
+#include "SysModules.h"
+#include "Sys/SysModPrint.h"
+#include "Sys/SysModUI.h"
+#include "Sys/SysModWeb.h"
 
-bool SysModModules::newConnection = false;
-bool SysModModules::isConnected = false;
+bool SysModules::newConnection = false;
+bool SysModules::isConnected = false;
 
-std::vector<Module *> SysModModules::modules;
-
-SysModModules::SysModModules() :Module("Modules") {
+SysModules::SysModules() {
   USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
   USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
 };
 
-void SysModModules::setup() {
-  for (Module *module:modules) {
+void SysModules::setup() {
+  for (SysModule *module:modules) {
     module->setup();
   }
 
   //do its own setup: will be shown as last module
-  parentVar = ui->initModule(parentVar, name);
+  JsonObject parentVar;
+  parentVar = ui->initModule(parentVar, "Modules");
 
-  JsonObject tableVar = ui->initTable(parentVar, "mdlTbl", nullptr, false, [](JsonObject var) { //uiFun
+  JsonObject tableVar = ui->initTable(parentVar, "mdlTbl", nullptr, false, [this](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Modules");
     web->addResponse(var["id"], "comment", "List of modules");
     JsonArray rows = web->addResponseA(var["id"], "table");
-    for (Module *module:SysModModules::modules) {
+    for (SysModule *module:modules) {
       JsonArray row = rows.createNestedArray();
       row.add(module->name);  //create a copy!
       row.add(module->success);
@@ -52,7 +51,7 @@ void SysModModules::setup() {
   ui->initCheckBox(tableVar, "mdlEnabled", true, false, [](JsonObject var) { //uiFun not readonly! (tbd)
     //initially set to true, but as enabled are table cells, will be updated to an array
     web->addResponse(var["id"], "label", "Enabled");
-  }, [](JsonObject var) { //chFun
+  }, [this](JsonObject var) { //chFun
     print->printJson("mdlEnabled.chFun", var);
     uint8_t rowNr = 0;
 
@@ -62,7 +61,7 @@ void SysModModules::setup() {
 
     //if value array not same size as nr of modules
     if (var["value"].size() != modules.size()) {
-      for (Module *module: modules) {
+      for (SysModule *module: modules) {
         var["value"][rowNr] = module->isEnabled;
         rowNr++;
       }
@@ -79,10 +78,22 @@ void SysModModules::setup() {
   });
 }
 
-void SysModModules::loop() {
-  for (Module *module:modules) {
+void SysModules::loop() {
+  bool oneSec = false;
+  bool tenSec = false;
+  if (millis() - oneSecondMillis >= 1000) {
+    oneSecondMillis = millis();
+    oneSec = true;
+  }
+  if (millis() - tenSecondMillis >= 10000) {
+    tenSecondMillis = millis();
+    tenSec = true;
+  }
+  for (SysModule *module:modules) {
     if (module->isEnabled && module->success) {
       module->loop();
+      if (oneSec) module->loop1s();
+      if (tenSec) module->loop10s();
       // module->testManager();
       // module->performanceManager();
       // module->dataSizeManager();
@@ -94,19 +105,15 @@ void SysModModules::loop() {
     isConnected = true;
     connectedChanged();
   }
-  if (millis() - secondMillis >= 5000) {
-    secondMillis = millis();
-    USER_PRINTF("❤️"); //heartbeat
-  }
 
 }
 
-void SysModModules::add(Module* module) {
+void SysModules::add(SysModule* module) {
   modules.push_back(module);
 }
 
-void SysModModules::connectedChanged() {
-  for (Module *module:modules) {
+void SysModules::connectedChanged() {
+  for (SysModule * module:modules) {
     module->connectedChanged();
   }
 }

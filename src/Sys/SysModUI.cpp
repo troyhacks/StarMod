@@ -16,14 +16,12 @@
 #include "html_ui.h"
 
 //init static variables (https://www.tutorialspoint.com/cplusplus/cpp_static_members.htm)
-std::vector<void(*)(JsonObject var)> SysModUI::ucFunctions;
+std::vector<UCFun> SysModUI::ucFunctions;
 std::vector<VarLoop> SysModUI::loopFunctions;
 int SysModUI::varCounter = 1; //start with 1 so it can be negative, see var["o"]
-bool SysModUI::valChangedForInstancesTemp = false;
-
 bool SysModUI::varLoopsChanged = false;;
 
-SysModUI::SysModUI() :Module("UI") {
+SysModUI::SysModUI() :SysModule("UI") {
   USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
   success &= web->addURL("/", "text/html", nullptr, PAGE_index, PAGE_index_L);
@@ -40,7 +38,7 @@ SysModUI::SysModUI() :Module("UI") {
 
 //serve index.htm
 void SysModUI::setup() {
-  Module::setup();
+  SysModule::setup();
 
   USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
@@ -72,7 +70,7 @@ void SysModUI::setup() {
 }
 
 void SysModUI::loop() {
-  // Module::loop();
+  // SysModule::loop();
 
   for (auto varLoop = begin (loopFunctions); varLoop != end (loopFunctions); ++varLoop) {
     if (millis() - varLoop->lastMillis >= varLoop->interval) {
@@ -87,7 +85,9 @@ void SysModUI::loop() {
 
         //send leds info in binary data format
         //tbd: this can crash on 64*64 matrices...
-        // USER_PRINTF("bufSize %d\n", varLoop->bufSize);
+        // USER_PRINTF(" %d\n", varLoop->bufSize);
+        if (SysModWeb::ws->count() == 0) USER_PRINTF("%s ws count 0\n", __PRETTY_FUNCTION__);
+        if (!SysModWeb::ws->enabled()) USER_PRINTF("%s ws not enabled\n", __PRETTY_FUNCTION__);
         AsyncWebSocketMessageBuffer * wsBuf = SysModWeb::ws->makeBuffer(varLoop->bufSize * 3 + 4);
         if (wsBuf) {//out of memory
           wsBuf->lock();
@@ -110,7 +110,7 @@ void SysModUI::loop() {
               client->binary(wsBuf);
             else {
               // web->clientsChanged = true; tbd: changed also if full status changes
-              // web->printClient("loopFun skip frame", client);
+              // print->printClient("loopFun skip frame", client);
             }
           }
           wsBuf->unlock();
@@ -129,16 +129,16 @@ void SysModUI::loop() {
     }
   }
 
-  if (millis() - secondMillis >= 1000) {
-    secondMillis = millis();
+}
 
-    //if something changed in vloops
-    if (varLoopsChanged) {
-      varLoopsChanged = false;
+void SysModUI::loop1s() {
+  //if something changed in vloops
+  if (varLoopsChanged) {
+    varLoopsChanged = false;
 
-      processUiFun("vlTbl");
-    }
+    processUiFun("vlTbl");
   }
+
 }
 
 JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * type, bool readOnly, UCFun uiFun, UCFun chFun, LoopFun loopFun) {
@@ -148,14 +148,14 @@ JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * ty
   if (var.isNull()) {
     USER_PRINTF("initVar create new %s: %s\n", type, id);
     if (parent.isNull()) {
-      JsonArray vars = SysModModel::model->as<JsonArray>();
+      JsonArray vars = mdl->model->as<JsonArray>();
       var = vars.createNestedObject();
     } else {
       if (parent["n"].isNull()) parent.createNestedArray("n"); //if parent exist and no "n" array, create it
       var = parent["n"].createNestedObject();
       // serializeJson(model, Serial);Serial.println();
     }
-    var["id"] = (char *)id; //copy!!
+    var["id"] = (char *)id; //create a copy!
   }
   else {
     USER_PRINT_NOT("Object %s already defined\n", id);
@@ -163,7 +163,7 @@ JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * ty
 
   if (!var.isNull()) {
     if (var["type"] != type) 
-      var["type"] = (char *)type; //copy!!
+      var["type"] = (char *)type; //create a copy!!
     if (var["ro"] != readOnly) 
       var["ro"] = readOnly;
     //readOnly's will be deleted, if not already so
@@ -172,25 +172,28 @@ JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * ty
     //if uiFun, add it to the list
     if (uiFun) {
       //if fun already in ucFunctions then reuse, otherwise add new fun in ucFunctions
-      std::vector<void(*)(JsonObject var)>::iterator itr = find(ucFunctions.begin(), ucFunctions.end(), uiFun);
-      if (itr!=ucFunctions.end()) //found
-        var["uiFun"] = distance(ucFunctions.begin(), itr); //assign found function
-      else { //not found
+      //lambda update: when replacing typedef void(*UCFun)(JsonObject); with typedef std::function<void(JsonObject)> UCFun; this gives error:
+      //  mismatched types 'T*' and 'std::function<void(ArduinoJson::V6213PB2::JsonObject)>' { return *__it == _M_value; }
+      //  it also looks like functions are not added more then once anyway
+      // std::vector<UCFun>::iterator itr = find(ucFunctions.begin(), ucFunctions.end(), uiFun);
+      // if (itr!=ucFunctions.end()) //found
+      //   var["uiFun"] = distance(ucFunctions.begin(), itr); //assign found function
+      // else { //not found
         ucFunctions.push_back(uiFun); //add new function
         var["uiFun"] = ucFunctions.size()-1;
-      }
+      // }
     }
 
     //if chFun, add it to the list
     if (chFun) {
       //if fun already in ucFunctions then reuse, otherwise add new fun in ucFunctions
-      std::vector<void(*)(JsonObject var)>::iterator itr = find(ucFunctions.begin(), ucFunctions.end(), chFun);
-      if (itr!=ucFunctions.end()) //found
-        var["chFun"] = distance(ucFunctions.begin(), itr); //assign found function
-      else { //not found
+      // std::vector<UCFun>::iterator itr = find(ucFunctions.begin(), ucFunctions.end(), chFun);
+      // if (itr!=ucFunctions.end()) //found
+      //   var["chFun"] = distance(ucFunctions.begin(), itr); //assign found function
+      // else { //not found
         ucFunctions.push_back(chFun); //add new function
         var["chFun"] = ucFunctions.size()-1;
-      }
+      // }
     }
 
     //if loopFun, add it to the list
@@ -259,7 +262,17 @@ const char * SysModUI::processJson(JsonVariant &json) {
       JsonVariant value = pair.value();
 
       // commands
-      if (pair.key() == "uiFun") { //JsonString can do ==
+      if (pair.key() == "v") {
+        // do nothing as it is no real var bu  the verbose command of WLED
+        USER_PRINTF("processJson v type %s\n", pair.value().as<String>());
+      }
+      else if (pair.key() == "view") {
+        // do nothing as it is no real var bu  the verbose command of WLED
+        JsonObject var = mdl->findVar("System");
+        USER_PRINTF("processJson view v:%s n: %d s:%s\n", pair.value().as<String>(), var.isNull(), var["id"].as<const char *>());
+        var["view"] = (char *)value.as<const char *>(); //create a copy!
+      }
+      else if (pair.key() == "uiFun") { //JsonString can do ==
         //find the select var and collect it's options...
         if (value.is<JsonArray>()) { //should be
           for (JsonVariant value2: value.as<JsonArray>()) {

@@ -8,7 +8,7 @@
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
  */
 
-#include "Module.h"
+#include "SysModule.h"
 
 #include "AppLedsV.h"
 #include "AppEffects.h"
@@ -19,33 +19,46 @@
 #include <vector>
 #include "FastLED.h"
 
+// #define FASTLED_RGBW
+
+//https://www.partsnotincluded.com/fastled-rgbw-neopixels-sk6812/
+inline uint16_t getRGBWsize(uint16_t nleds){
+	uint16_t nbytes = nleds * 4;
+	if(nbytes % 3 > 0) return nbytes / 3 + 1;
+	else return nbytes / 3;
+}
+
 //https://github.com/FastLED/FastLED/blob/master/examples/DemoReel100/DemoReel100.ino
 //https://blog.ja-ke.tech/2019/06/02/neopixel-performance.html
 
-class AppModLeds:public Module {
+class AppModLeds:public SysModule {
 
 public:
-  unsigned long frameMillis = 0;
-  unsigned long frameCounter = 0;
   bool newFrame = false; //for other modules (DDP)
 
-  //need to make these static as they are called in lambda functions 
-  static uint16_t fps;
+  uint16_t fps = 60;
   unsigned long lastMappingMillis = 0;
-  static bool doMap;
+  bool doMap = false;
+  Effects effects;
 
-  static Effects effects;
-
-  AppModLeds() :Module("Leds") {};
+  AppModLeds() :SysModule("Leds") {};
 
   void setup() {
-    Module::setup();
+    SysModule::setup();
     USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
     parentVar = ui->initModule(parentVar, name);
+    JsonObject currentVar;
+
+    currentVar = ui->initCheckBox(parentVar, "on", true, false, [](JsonObject var) { //uiFun
+      web->addResponse(var["id"], "label", "On/Off");
+    }, [](JsonObject var) { //chFun
+      ui->valChangedForInstancesTemp = true;
+    });
+    currentVar["stage"] = true;
 
     //logarithmic slider (10)
-    ui->initSlider(parentVar, "bri", 5, 0, 255, 10, false, [](JsonObject var) { //uiFun
+    currentVar = ui->initSlider(parentVar, "bri", 10, 0, 255, false, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "Brightness");
     }, [](JsonObject var) { //chFun
       uint8_t bri = var["value"];
@@ -55,8 +68,10 @@ public:
       FastLED.setBrightness(result);
 
       USER_PRINTF("Set Brightness to %d -> b:%d r:%d\n", var["value"].as<int>(), bri, result);
-      SysModUI::valChangedForInstancesTemp = true;
+      ui->valChangedForInstancesTemp = true;
     });
+    currentVar["log"] = true; //logarithmic
+    currentVar["stage"] = true; //these values override model.json???
 
     ui->initCanvas(parentVar, "pview", -1, false, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "Preview");
@@ -71,27 +86,29 @@ public:
         buffer[i*3+4+2] = ledsP[i].blue;
       }
       //new values
-      buffer[0] = LedsV::nrOfLedsP/256;
-      buffer[1] = LedsV::nrOfLedsP%256;
-      buffer[3] = max(LedsV::nrOfLedsP * SysModWeb::ws->count()/200, 16U); //interval in ms * 10, not too fast
+      buffer[0] = ledsV.nrOfLedsP/256;
+      buffer[1] = ledsV.nrOfLedsP%256;
+      buffer[3] = max(ledsV.nrOfLedsP * SysModWeb::ws->count()/200, 16U); //interval in ms * 10, not too fast
     });
 
-    ui->initSelect(parentVar, "fx", 0, false, [](JsonObject var) { //uiFun
+    currentVar = ui->initSelect(parentVar, "fx", 0, false, [this](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "Effect");
       web->addResponse(var["id"], "comment", "Effect to show");
       JsonArray select = web->addResponseA(var["id"], "select");
       for (Effect *effect:effects.effects) {
         select.add(effect->name());
       }
-    }, [](JsonObject var) { //chFun
+    }, [this](JsonObject var) { //chFun
       uint8_t fx = var["value"];
       USER_PRINTF("%s Change %s to %d\n", "initSelect chFun", var["id"].as<const char *>(), fx);
 
       doMap = effects.setEffect("fx", fx);
-      SysModUI::valChangedForInstancesTemp = true;
+      ui->valChangedForInstancesTemp = true;
     });
+    currentVar["stage"] = true;
 
-    ui->initSelect(parentVar, "palette", 4, false, [](JsonObject var) { //uiFun.
+    currentVar = ui->initSelect(parentVar, "pal", 4, false, [](JsonObject var) { //uiFun.
+      web->addResponse(var["id"], "label", "Palette");
       JsonArray select = web->addResponseA(var["id"], "select");
       select.add("CloudColors");
       select.add("LavaColors");
@@ -114,27 +131,33 @@ public:
         case 7: palette = HeatColors_p; break;
         default: palette = PartyColors_p; break;
       }
-      SysModUI::valChangedForInstancesTemp = true;
+      ui->valChangedForInstancesTemp = true;
     });
+    currentVar["stage"] = true;
 
-    ui->initSelect(parentVar, "projection", 2, false, [](JsonObject var) { //uiFun.
-      // web->addResponse(var["id"], "label", "Effect");
+    currentVar = ui->initSelect(parentVar, "pro", 2, false, [](JsonObject var) { //uiFun.
+      web->addResponse(var["id"], "label", "Projection");
       web->addResponse(var["id"], "comment", "How to project fx to fixture");
       JsonArray select = web->addResponseA(var["id"], "select");
       select.add("None"); // 0
       select.add("Random"); // 1
       select.add("Distance from point"); //2
       select.add("Distance from centre"); //3
-    }, [](JsonObject var) { //chFun
+      select.add("Mirror"); //4
+      select.add("Reverse"); //5
+      select.add("Multiply"); //6
+      select.add("Kaleidoscope"); //7
+      select.add("Fun"); //8
+    }, [this](JsonObject var) { //chFun
       USER_PRINTF("%s Change %s to %d\n", "initSelect chFun", var["id"].as<const char *>(), var["value"].as<int>());
 
-      LedsV::projectionNr = var["value"];
+      ledsV.projectionNr = var["value"];
       doMap = true;
-      SysModUI::valChangedForInstancesTemp = true;
+      ui->valChangedForInstancesTemp = true;
     });
+    currentVar["stage"] = true;
 
-    ui->initSelect(parentVar, "ledFix", 0, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "LedFix");
+    ui->initSelect(parentVar, "fixture", 0, false, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "comment", "Fixture to display effect on");
       JsonArray select = web->addResponseA(var["id"], "select");
       files->dirToJson(select, true, "D"); //only files containing D (1D,2D,3D), alphabetically, only looking for D not very destinctive though
@@ -144,14 +167,14 @@ public:
       if (files->seqNrToName(fileName, var["value"])) {
         web->addResponse("pview", "file", fileName);
       }
-    }, [](JsonObject var) { //chFun
+    }, [this](JsonObject var) { //chFun
       USER_PRINTF("%s Change %s to %d\n", "initSelect chFun", var["id"].as<const char *>(), var["value"].as<int>());
 
-      LedsV::ledFixNr = var["value"];
+      ledsV.fixtureNr = var["value"];
       doMap = true;
 
       char fileName[32] = "";
-      if (files->seqNrToName(fileName, LedsV::ledFixNr)) {
+      if (files->seqNrToName(fileName, ledsV.fixtureNr)) {
         //send to pview a message to get file filename
         JsonDocument *responseDoc = web->getResponseDoc();
         responseDoc->clear(); //needed for deserializeJson?
@@ -159,28 +182,28 @@ public:
 
         web->addResponse("pview", "file", fileName);
         web->sendDataWs(responseVariant);
-        print->printJson("ledfix chFun send ws done", responseVariant); //during server startup this is not send to a client, so client refresh should also trigger this
+        print->printJson("fixture chFun send ws done", responseVariant); //during server startup this is not send to a client, so client refresh should also trigger this
       }
-    }); //ledFix
+    }); //fixture
 
     ui->initText(parentVar, "dimensions", nullptr, 32, true, [](JsonObject var) { //uiFun
       char details[32] = "";
-      print->fFormat(details, sizeof(details)-1, "P:%dx%dx%d V:%dx%dx%d", LedsV::widthP, LedsV::heightP, LedsV::depthP, LedsV::widthV, LedsV::heightV, LedsV::depthV);
+      print->fFormat(details, sizeof(details)-1, "P:%dx%dx%d V:%dx%dx%d", ledsV.widthP, ledsV.heightP, ledsV.depthP, ledsV.widthV, ledsV.heightV, ledsV.depthV);
       web->addResponse(var["id"], "value", details);
     });
 
     ui->initText(parentVar, "nrOfLeds", nullptr, 32, true, [](JsonObject var) { //uiFun
       char details[32] = "";
-      print->fFormat(details, sizeof(details)-1, "P:%d V:%d", LedsV::nrOfLedsP, LedsV::nrOfLedsV);
+      print->fFormat(details, sizeof(details)-1, "P:%d V:%d", ledsV.nrOfLedsP, ledsV.nrOfLedsV);
       web->addResponse(var["id"], "value", details);
       web->addResponseV(var["id"], "comment", "Max %d", NUM_LEDS_Preview);
     });
 
     ui->initNumber(parentVar, "fps", fps, 1, 999, false, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "comment", "Frames per second");
-    }, [](JsonObject var) { //chFun
-      AppModLeds::fps = var["value"];
-      USER_PRINTF("fps changed %d\n", AppModLeds::fps);
+    }, [this](JsonObject var) { //chFun
+      fps = var["value"];
+      USER_PRINTF("fps changed %d\n", fps);
     });
 
     ui->initText(parentVar, "realFps", nullptr, 10, true, [](JsonObject var) { //uiFun
@@ -189,19 +212,15 @@ public:
 
     #ifdef USERMOD_E131
       // if (e131mod->isEnabled) {
-        ui->initNumber(parentVar, "dmxChannel", 1, 1, 512, false, [](JsonObject var) { //uiFun
-          web->addResponse(var["id"], "comment", "First channel (bri, fx, palette + fx channels, total 5 now)");
-        }, [](JsonObject var) { //chFun
-          uint16_t dmxChannel = var["value"];
-          e131mod->patchChannel(dmxChannel + 0, "bri", 255); //should be 256??
-          e131mod->patchChannel(dmxChannel + 1, "fx", effects.size());
-          e131mod->patchChannel(dmxChannel + 2, "palette", 8); //tbd: calculate nr of palettes (from select)
+          e131mod->patchChannel(0, "bri", 255); //should be 256??
+          e131mod->patchChannel(1, "fx", effects.size());
+          e131mod->patchChannel(2, "pal", 8); //tbd: calculate nr of palettes (from select)
+          // //add these temporary to test remote changing of this values do not crash the system
+          // e131mod->patchChannel(3, "pro", Projections::count);
+          // e131mod->patchChannel(4, "fixture", 5); //assuming 5!!!
 
           ui->valChangedForInstancesTemp = true;
-        });
-        // //add these temporary to test remote changing of this values do not crash the system
-        // e131mod->patchChannel(3, "projection", Projections::count);
-        // e131mod->patchChannel(4, "ledFix", 5); //assuming 5!!!
+          
       // }
       // else
       //   USER_PRINTF("Leds e131 not enabled\n");
@@ -213,7 +232,7 @@ public:
   }
 
   void loop() {
-    // Module::loop();
+    // SysModule::loop();
 
     //set new frame
     if (millis() - frameMillis >= 1000.0/fps) {
@@ -231,24 +250,17 @@ public:
       newFrame = false;
     }
 
-    //update ui
-    if (millis() - secondMillis >= 1000) {
-      secondMillis = millis();
-      mdl->setValueLossy("realFps", "%lu /s", frameCounter);
-      frameCounter = 0;
-    }
-
     //update projection
     if (millis() - lastMappingMillis >= 1000 && doMap) { //not more then once per second (for E131)
       lastMappingMillis = millis();
       doMap = false;
-      ledsV.ledFixProjectAndMap();
+      ledsV.fixtureProjectAndMap();
 
       //https://github.com/FastLED/FastLED/wiki/Multiple-Controller-Examples
 
       //allocatePins
       uint8_t pinNr=0;
-      for (PinObject pinObject:SysModPins::pinObjects) {
+      for (PinObject pinObject:pins->pinObjects) {
         if (strcmp(pinObject.owner, "Leds")== 0) {
           //dirty trick to decode nrOfLedsPerPin
           char * after = strtok((char *)pinObject.details, "-");
@@ -322,10 +334,15 @@ public:
     }
   } //loop
 
+  void loop1s() {
+    mdl->setValueLossy("realFps", "%lu /s", frameCounter);
+    frameCounter = 0;
+  }
+
+private:
+  unsigned long frameMillis = 0;
+  unsigned long frameCounter = 0;
+
 };
 
 static AppModLeds *lds;
-
-uint16_t AppModLeds::fps = 120;
-bool AppModLeds::doMap = false;
-Effects AppModLeds::effects;

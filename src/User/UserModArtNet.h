@@ -10,16 +10,16 @@
 
 #define ARTNET_DEFAULT_PORT 6454
 
-static const size_t ART_NET_HEADER_SIZE = 12;
-static const byte   ART_NET_HEADER[] PROGMEM = {0x41,0x72,0x74,0x2d,0x4e,0x65,0x74,0x00,0x00,0x50,0x00,0x0e};
+const size_t ART_NET_HEADER_SIZE = 12;
+const byte   ART_NET_HEADER[] PROGMEM = {0x41,0x72,0x74,0x2d,0x4e,0x65,0x74,0x00,0x00,0x50,0x00,0x0e};
 
-class UserModArtNet:public Module {
+class UserModArtNet:public SysModule {
 
 public:
 
-  static IPAddress targetIp; //tbd: targetip also configurable from fixtures and artnet instead of pin output
+  IPAddress targetIp; //tbd: targetip also configurable from fixtures and artnet instead of pin output
 
-  UserModArtNet() :Module("ArtNet") {
+  UserModArtNet() :SysModule("ArtNet") {
     USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
     isEnabled = false; //default off
@@ -29,7 +29,7 @@ public:
 
   //setup filesystem
   void setup() {
-    Module::setup();
+    SysModule::setup();
     USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
     parentVar = ui->initModule(parentVar, name);
@@ -38,17 +38,24 @@ public:
       web->addResponse(var["id"], "label", "Instance");
       web->addResponse(var["id"], "comment", "Instance to send data");
       JsonArray select = web->addResponseA(var["id"], "select");
-      for (NodeInfo node: UserModInstances::nodes) {
-        char option[32] = { 0 };
-        strncpy(option, node.ip.toString().c_str(), sizeof(option)-1);
-        strncat(option, " ", sizeof(option)-1);
-        strncat(option, node.name, sizeof(option)-1);
-        select.add(option);
+      JsonArray instanceObject = select.createNestedArray();
+      instanceObject.add(0);
+      instanceObject.add("no sync");
+      for (auto node=instances->nodes.begin(); node!=instances->nodes.end(); ++node) {
+        if (node->ip != WiFi.localIP()) {
+          char option[32] = { 0 };
+          strncpy(option, node->ip.toString().c_str(), sizeof(option)-1);
+          strncat(option, " ", sizeof(option)-1);
+          strncat(option, node->name, sizeof(option)-1);
+          instanceObject = select.createNestedArray();
+          instanceObject.add(node->ip[3]);
+          instanceObject.add(option);
+        }
       }
-    }, [](JsonObject var) { //chFun
+    }, [this](JsonObject var) { //chFun
       size_t ddpInst = var["value"];
-      if (ddpInst >=0 && ddpInst < UserModInstances::nodes.size()) {
-        targetIp = UserModInstances::nodes[ddpInst].ip;
+      if (ddpInst >=0 && ddpInst < instances->nodes.size()) {
+        targetIp = instances->nodes[ddpInst].ip;
         USER_PRINTF("Start ArtNet to %s\n", targetIp.toString().c_str());
       }
     }); //ddpInst
@@ -57,9 +64,9 @@ public:
   }
 
   void loop() {
-    // Module::loop();
+    // SysModule::loop();
 
-    if(!SysModModules::isConnected) return;
+    if(!SysModules::isConnected) return;
 
     if(!targetIp) return;
 
@@ -132,5 +139,3 @@ public:
 };
 
 static UserModArtNet *artnetmod;
-
-IPAddress UserModArtNet::targetIp;

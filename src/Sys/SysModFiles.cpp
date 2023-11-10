@@ -18,7 +18,7 @@
 
 bool SysModFiles::filesChanged = false;
 
-SysModFiles::SysModFiles() :Module("Files") {
+SysModFiles::SysModFiles() :SysModule("Files") {
   USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
   if (!LittleFS.begin(true)) { //true: formatOnFail
@@ -32,10 +32,10 @@ SysModFiles::SysModFiles() :Module("Files") {
 
 //setup filesystem
 void SysModFiles::setup() {
-  Module::setup();
+  SysModule::setup();
   parentVar = ui->initModule(parentVar, name);
 
-  JsonObject tableVar = ui->initTable(parentVar, "fileTbl", nullptr, false, [](JsonObject var) { //uiFun
+  JsonObject tableVar = ui->initTable(parentVar, "fileTbl", nullptr, false, [this](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Files");
     web->addResponse(var["id"], "comment", "List of files");
     JsonArray rows = web->addResponseA(var["id"], "table");
@@ -69,9 +69,9 @@ void SysModFiles::setup() {
 
   ui->initButton(parentVar, "deleteFiles", nullptr, false, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "comment", "All but model.json");
-  }, [](JsonObject var) {
+  }, [this](JsonObject var) {
     USER_PRINTF("delete files\n");
-    files->removeFiles("model.json", true); //all but model.json
+    removeFiles("model.json", true); //all but model.json
   });
 
   // ui->initURL(parentVar, "urlTest", "file/3DCube202005.json", true);
@@ -84,7 +84,7 @@ void SysModFiles::setup() {
 }
 
 void SysModFiles::loop(){
-  // Module::loop();
+  // SysModule::loop();
 
   // if (millis() - secondMillis >= 10000) {
   //   secondMillis = millis();
@@ -163,6 +163,7 @@ bool SysModFiles::seqNrToName(char * fileName, size_t seqNr) {
       root.close();
       strncat(fileName, "/", 31); //add root prefix, fileName is 32 bytes but sizeof doesn't know so cheating
       strncat(fileName, file.name(), 31);
+      file.close();
       return true;
     }
 

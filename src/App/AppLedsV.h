@@ -14,19 +14,17 @@
 
 #define NUM_LEDS_Preview 8192
 
-//keep them global for the time being as FastLed effects refer to them and want to keep that code as unchanged as possible
-//(so maybe move there?)
-
-static float distance(uint16_t x1, uint16_t y1, uint16_t z1, uint16_t x2, uint16_t y2, uint16_t z2) {
-    return sqrtf((x1-x2)*(x1-x2) + (y1-y2)*(y1-y2) + (z1-z2)*(z1-z2));
-}
-
 enum Projections
 {
   p_None,
   p_Random,
   p_DistanceFromPoint,
   p_DistanceFromCentre,
+  p_Reverse,
+  p_Mirror,
+  p_Multiply,
+  p_Kaleidoscope,
+  p_Fun,
   count
 };
 
@@ -49,21 +47,37 @@ public:
   // leds = (CRGB*)malloc(nrOfLeds * sizeof(CRGB));
   // leds = (CRGB*)reallocarray
 
-  static uint16_t nrOfLedsP; //amount of physical leds
-  static uint16_t nrOfLedsV;  //amount of virtual leds (calculated by projection)
+  uint16_t nrOfLedsP = 64; //amount of physical leds
+  uint16_t nrOfLedsV = 64;  //amount of virtual leds (calculated by projection)
 
-  static uint16_t widthP; 
-  static uint16_t heightP; 
-  static uint16_t depthP; 
-  static uint16_t widthV; 
-  static uint16_t heightV; 
-  static uint16_t depthV; 
+  uint16_t widthP = 8; 
+  uint16_t heightP = 8; 
+  uint16_t depthP = 1; 
+  uint16_t widthV = 8; 
+  uint16_t heightV = 8; 
+  uint16_t depthV = 1; 
 
-  static uint8_t projectionNr;
-  static uint8_t ledFixNr;
-  static uint8_t fxDimension;
+  uint8_t projectionNr = -1;
+  uint8_t fixtureNr = -1;
+  uint8_t effectDimension = -1;
 
-  void ledFixProjectAndMap();
+  //track pins and leds
+  uint8_t currPin;
+  uint16_t prevLeds;
+  uint16_t pointX, pointY, pointZ; //for distance from 
+
+  float distance(uint16_t x1, uint16_t y1, uint16_t z1, uint16_t x2, uint16_t y2, uint16_t z2) {
+    return sqrtf((x1-x2)*(x1-x2) + (y1-y2)*(y1-y2) + (z1-z2)*(z1-z2));
+  }
+
+  uint16_t XY( uint8_t x, uint8_t y) {
+    return x + y * widthV;
+  }
+  uint16_t XYZ( uint8_t x, uint8_t y, uint8_t z) {
+    return x + y * widthV + z * widthV * heightV;
+  }
+
+  void fixtureProjectAndMap();
 
   uint16_t indexVLocal = 0; //set in operator[], used by operator=
 
@@ -100,9 +114,8 @@ public:
   // }
 
 private:
-  //need to make these static as they are called in lambda functions
-  static std::vector<std::vector<uint16_t>> mappingTable;
-  static uint16_t mappingTableLedCounter;
+  std::vector<std::vector<uint16_t>> mappingTable;
+  uint16_t mappingTableLedCounter;
 };
 
 //Global vars!

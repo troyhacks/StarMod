@@ -9,18 +9,16 @@
  */
 
 #include "SysModModel.h"
-#include "Module.h"
+#include "SysModule.h"
 #include "SysModWeb.h"
 #include "SysModPrint.h"
 #include "SysModUI.h"
 #include "SysModFiles.h"
 #include "SysJsonRDWS.h"
 
-bool SysModModel::doWriteModel = false;
-bool SysModModel::doShowObsolete = false;
 DynamicJsonDocument * SysModModel::model = nullptr;
 
-SysModModel::SysModModel() :Module("Model") {
+SysModModel::SysModModel() :SysModule("Model") {
   model = new DynamicJsonDocument(24576);
 
   JsonArray root = model->to<JsonArray>(); //create
@@ -39,7 +37,7 @@ SysModModel::SysModModel() :Module("Model") {
 }
 
 void SysModModel::setup() {
-  Module::setup();
+  SysModule::setup();
 
   USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
@@ -51,13 +49,13 @@ void SysModModel::setup() {
 
   ui->initButton(parentVar, "saveModel", nullptr, false, [](JsonObject var) {
     web->addResponse(var["id"], "comment", "Write to model.json (manual save only currently)");
-  }, [](JsonObject var) {
+  }, [this](JsonObject var) {
     doWriteModel = true;
   });
 
   ui->initCheckBox(parentVar, "showObsolete", false, false, [](JsonObject var) {
     web->addResponse(var["id"], "comment", "Show in UI (refresh)");
-  }, [](JsonObject var) {
+  }, [this](JsonObject var) {
     doShowObsolete = var["value"];
   });
 
@@ -78,7 +76,7 @@ void SysModModel::setup() {
 }
 
   void SysModModel::loop() {
-  // Module::loop();
+  // SysModule::loop();
 
   if (!cleanUpModelDone) { //do after all setups
     cleanUpModelDone = true;
@@ -99,17 +97,15 @@ void SysModModel::setup() {
     doWriteModel = false;
   }
 
-  if (millis() - secondMillis >= 1000) {
-    secondMillis = millis();
-    setValueLossy("mSize", "%d / %d B", model->memoryUsage(), model->capacity());
-  }
-
   if (model->memoryUsage() / model->capacity() > 0.95) {
     print->printJDocInfo("model", *model);
     size_t memBefore = model->memoryUsage();
     model->garbageCollect();
     print->printJDocInfo("garbageCollect", *model);
   }
+}
+void SysModModel::loop1s() {
+  setValueLossy("mSize", "%d / %d B", model->memoryUsage(), model->capacity());
 }
 
 void SysModModel::cleanUpModel(JsonArray vars) {
@@ -238,7 +234,6 @@ JsonObject SysModModel::setValueB(const char * id, bool value, uint8_t rowNr) {
 
 //Set value with argument list
 JsonObject SysModModel::setValueV(const char * id, const char * format, ...) {
-  // return JsonObject();
   va_list args;
   va_start(args, format);
 
@@ -258,7 +253,7 @@ JsonObject SysModModel::setValueP(const char * id, const char * format, ...) {
   // size_t len = vprintf(format, args);
   char value[128];
   vsnprintf(value, sizeof(value)-1, format, args);
-  // USER_PRINTF("%s\n", value);
+  USER_PRINTF("%s\n", value);
 
   va_end(args);
 
@@ -322,4 +317,21 @@ JsonObject SysModModel::findVar(const char * id, JsonArray parent) {
     }
   }
   return foundVar;
+}
+
+void SysModModel::findVars(const char * id, bool value, FindFun fun, JsonArray parent) {
+  JsonArray root;
+  // print ->print("findVar %s %s\n", id, parent.isNull()?"root":"n");
+  if (parent.isNull()) {
+    root = model->as<JsonArray>();
+  }
+  else {
+    root = parent;
+  }
+  for(JsonObject var : root) {
+      if (var[id] == value)
+        fun(var);
+      if (!var["n"].isNull())
+        findVars(id, value, fun, var["n"]);
+  }
 }

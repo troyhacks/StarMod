@@ -9,20 +9,23 @@
  */
 
 #pragma once
-#include "Module.h"
+#include "SysModule.h"
 
 #include "ArduinoJson.h"
 
-class SysModModel:public Module {
+typedef std::function<void(JsonObject)> FindFun;
+
+class SysModModel:public SysModule {
 
 public:
 
   // StaticJsonDocument<24576> model; //not static as that blows up the stack. Use extern??
-  static DynamicJsonDocument *model;
+  static DynamicJsonDocument *model; //needs to be static as loopTask and asyncTask is using it...
 
   SysModModel();
   void setup();
   void loop();
+  void loop1s();
 
   //scan all vars in the model and remove the s element 
   void cleanUpModel(JsonArray vars);
@@ -67,10 +70,11 @@ public:
 
   //returns the var defined by id (parent to recursively call findVar)
   static JsonObject findVar(const char * id, JsonArray parent = JsonArray()); //static for processJson
+  void findVars(const char * id, bool value, FindFun fun, JsonArray parent = JsonArray());
   
 private:
-  static bool doWriteModel;
-  static bool doShowObsolete;
+  bool doWriteModel = false;
+  bool doShowObsolete = false;
   bool cleanUpModelDone = false;
 
 };

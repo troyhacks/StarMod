@@ -11,10 +11,12 @@
 #pragma once
 #include <vector>
 #include "ArduinoJson.h"
-#include "Module.h"
+#include "SysModule.h"
 
-typedef void(*UCFun)(JsonObject);
-typedef void(*LoopFun)(JsonObject, uint8_t*);
+// https://stackoverflow.com/questions/59111610/how-do-you-declare-a-lambda-function-using-typedef-and-then-use-it-by-passing-to
+typedef std::function<void(JsonObject)> UCFun;
+// typedef void(*LoopFun)(JsonObject, uint8_t*); //std::function is crashing...
+typedef std::function<void(JsonObject, uint8_t*)> LoopFun;
 
 struct VarLoop {
   JsonObject var;
@@ -42,10 +44,10 @@ static uint8_t linearToLogarithm(JsonObject var, uint8_t value) {
   return round(exp(minv + scale*((float)value-minp)));
 }
 
-class SysModUI:public Module {
+class SysModUI:public SysModule {
 
 public:
-  static bool valChangedForInstancesTemp;
+  bool valChangedForInstancesTemp = false; //tbd: move mechanism to UserModInstances as there it will be used
 
   SysModUI();
 
@@ -53,6 +55,7 @@ public:
   void setup();
 
   void loop();
+  void loop1s();
 
   JsonObject initModule(JsonObject parent, const char * id, const char * value = nullptr, bool readOnly = false, UCFun uiFun = nullptr, UCFun chFun = nullptr, LoopFun loopFun = nullptr) {
     return initVarAndUpdate<const char *>(parent, id, "module", value, 0, 0, readOnly, uiFun, chFun, loopFun);
@@ -75,8 +78,8 @@ public:
   }
 
   //init a range slider, range between 0 and 255!
-  JsonObject initSlider(JsonObject parent, const char * id, int value, int min = 0, int max = 255, int log = 0, bool readOnly = false, UCFun uiFun = nullptr, UCFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<int>(parent, id, "range", value, min, max, readOnly, uiFun, chFun, loopFun,  { log });
+  JsonObject initSlider(JsonObject parent, const char * id, int value, int min = 0, int max = 255, bool readOnly = false, UCFun uiFun = nullptr, UCFun chFun = nullptr, LoopFun loopFun = nullptr) {
+    return initVarAndUpdate<int>(parent, id, "range", value, min, max, readOnly, uiFun, chFun, loopFun);
   }
 
   JsonObject initCanvas(JsonObject parent, const char * id, int value, bool readOnly = false, UCFun uiFun = nullptr, UCFun chFun = nullptr, LoopFun loopFun = nullptr) {
@@ -104,7 +107,7 @@ public:
   }
 
   template <typename Type>
-  JsonObject initVarAndUpdate(JsonObject parent, const char * id, const char * type, Type value, int min, int max, bool readOnly = true, UCFun uiFun = nullptr, UCFun chFun = nullptr, LoopFun loopFun = nullptr, std::initializer_list<int> custom = {}) {
+  JsonObject initVarAndUpdate(JsonObject parent, const char * id, const char * type, Type value, int min, int max, bool readOnly = true, UCFun uiFun = nullptr, UCFun chFun = nullptr, LoopFun loopFun = nullptr) {
     JsonObject var = initVar(parent, id, type, readOnly, uiFun, chFun, loopFun);
     bool isPointer = std::is_pointer<Type>::value;
     //set a default if not a value yet
@@ -115,18 +118,9 @@ public:
       else
         var["value"] = value; //if value is a pointer, it needs to have a value
     }
-    
+
     if (min) var["min"] = min;
     if (max) var["max"] = max;
-
-    //custom vars
-    uint8_t i = 0;
-    for (int c: custom) {
-      switch (i) {
-        case 0: if (c) var["log"] = true; break; //0 is log WIP!!
-      }
-      i++;
-    };
 
     //no call of fun for buttons otherwise all buttons will be fired including restart delete model.json and all that jazz!!! 
     if (strcmp(type,"button")!=0 && chFun && (!isPointer || value)) chFun(var); //!isPointer because 0 is also a value then
@@ -138,19 +132,19 @@ public:
   //run the change function and send response to all? websocket clients
   static void setChFunAndWs(JsonObject var, const char * value = nullptr);
 
-  //interpret json and run commands or set values
+  //interpret json and run commands or set values like deserializeJson / deserializeState / deserializeConfig
   static const char * processJson(JsonVariant &json); //static for setupJsonHandlers
 
   //called to rebuild selects and tables (tbd: also label and comments is done again, that is not needed)
   void processUiFun(const char * id);
 
 private:
-  static bool varLoopsChanged;
+  static bool varLoopsChanged;// = false;
 
   static int varCounter; //not static crashes ??? (not called async...?)
 
-  static std::vector<UCFun> ucFunctions;
-  static std::vector<VarLoop> loopFunctions;
+  static std::vector<UCFun> ucFunctions; //static because of static functions setChFunAndWs, processJson...
+  static std::vector<VarLoop> loopFunctions; //non static crashing ...
 
 };
 

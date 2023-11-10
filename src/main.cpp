@@ -12,8 +12,8 @@
 // git reset --hard HEAD^
 // git push origin -f
 
-#include "Module.h"
-#include "Sys/SysModModules.h"
+#include "SysModule.h"
+#include "SysModules.h"
 #include "Sys/SysModPrint.h"
 #include "Sys/SysModWeb.h"
 #include "Sys/SysModUI.h"
@@ -26,7 +26,7 @@
 #include "User/UserModMDNS.h"
 #ifdef APPMOD_LEDS
   #include "App/AppModLeds.h"
-  #include "App/AppModLedFixGen.h"
+  #include "App/AppModFixtureGen.h"
   #ifdef USERMOD_ARTNET
     #include "User/UserModArtNet.h"
   #endif
@@ -46,7 +46,7 @@
 
 //setup all modules
 void setup() {
-  mdls = new SysModModules();
+  mdls = new SysModules();
   
   print = new SysModPrint();
   files = new SysModFiles();
@@ -60,7 +60,7 @@ void setup() {
   mdns = new UserModMDNS();
   #ifdef APPMOD_LEDS
     lds = new AppModLeds();
-    lfg = new AppModLedFixGen();
+    lfg = new AppModFixtureGen();
     #ifdef USERMOD_ARTNET
       artnetmod = new UserModArtNet();
     #endif

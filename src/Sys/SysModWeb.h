@@ -9,11 +9,11 @@
 */
 
 #pragma once
-#include "Module.h"
+#include "SysModule.h"
 
 #include <ESPAsyncWebServer.h>
 
-class SysModWeb:public Module {
+class SysModWeb:public SysModule {
 
 public:
   static AsyncWebSocket *ws;
@@ -21,15 +21,13 @@ public:
   SysModWeb();
 
   void setup();
-
   void loop();
+  void loop1s();
 
   void connectedChanged();
 
   static void wsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len);
   static void wsEvent2(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len);
-
-  static void printClient(const char * text, AsyncWebSocketClient * client);
 
   //send json to client or all clients
   static void sendDataWs(JsonVariant json = JsonVariant(), AsyncWebSocketClient * client = nullptr);
@@ -40,7 +38,7 @@ public:
   //not used at the moment
   bool processURL(const char * uri, void (*func)(AsyncWebServerRequest *));
 
-  // curl -F 'data=@ledfix1.json' 192.168.8.213/upload
+  // curl -F 'data=@fixture1.json' 192.168.8.213/upload
   bool addUpload(const char * uri);
   // curl -s -F "update=@/Users/ewoudwijma/Developer/GitHub/ewowi/StarMod/.pio/build/esp32dev/firmware.bin" 192.168.8.102/update /dev/null &
   bool addUpdate(const char * uri);
@@ -50,9 +48,10 @@ public:
   //try this !!!: curl -X POST "http://192.168.121.196/json" -d '{"pin2":false}' -H "Content-Type: application/json"
   //curl -X POST "http://4.3.2.1/json" -d '{"pin2":false}' -H "Content-Type: application/json"
   //curl -X POST "http://4.3.2.1/json" -d '{"bri":20}' -H "Content-Type: application/json"
-  //curl -X POST "http://192.168.8.102/json" -d '{"fx":2}' -H "Content-Type: application/json"
+  //curl -X POST "http://192.168.8.125/json" -d '{"fx":2}' -H "Content-Type: application/json"
   //curl -X POST "http://192.168.8.152/json" -d '{"nrOfLeds":2000}' -H "Content-Type: application/json"
 
+  //set ws var and create AsyncCallbackJsonWebHandler , currently for /json
   bool setupJsonHandlers(const char * uri, const char * (*processFunc)(JsonVariant &));
 
   void addResponse(const char * id, const char * key, const char * value);
@@ -66,9 +65,10 @@ public:
 
   void clientsToJson(JsonArray array, bool nameOnly = false, const char * filter = nullptr);
 
-  //gets the right responseDoc, depending on which task you are in
+  //gets the right responseDoc, depending on which task you are in, alternative for requestJSONBufferLock
   JsonDocument * getResponseDoc();
 
+  //Currently only WLED style state and info
   static void serveJson(AsyncWebServerRequest *request);
   
   static unsigned long wsSendBytesCounter;

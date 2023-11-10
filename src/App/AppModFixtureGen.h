@@ -1,6 +1,6 @@
 /*
    @title     StarMod
-   @file      AppModLedFixGen.h
+   @file      AppModFixtureGen.h
    @date      20231016
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
@@ -8,7 +8,7 @@
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 */
 
-#include "Module.h"
+#include "SysModule.h"
 
 class GenFix {
 
@@ -484,7 +484,7 @@ public:
   //https://opengl.org.ru/docs/pg/0208.html
   void geodesicDome3D (uint16_t startX, uint16_t startY, uint16_t startZ) {
  
-    static uint8_t tindices[20][3] = {    {0,4,1}, {0,9,4}, {9,5,4}, {4,5,8}, {4,8,1},       {8,10,1}, {8,3,10}, {5,3,8}, {5,2,3}, {2,7,3},       {7,10,3}, {7,6,10}, {7,11,6}, {11,0,6}, {0,1,6},    {6,1,10}, {9,0,11}, {9,11,2}, {9,2,5}, {7,2,11} };
+    uint8_t tindices[20][3] = {    {0,4,1}, {0,9,4}, {9,5,4}, {4,5,8}, {4,8,1},       {8,10,1}, {8,3,10}, {5,3,8}, {5,2,3}, {2,7,3},       {7,10,3}, {7,6,10}, {7,11,6}, {11,0,6}, {0,1,6},    {6,1,10}, {9,0,11}, {9,11,2}, {9,2,5}, {7,2,11} };
 
     openPin();
 
@@ -496,19 +496,19 @@ public:
 
 };
 
-class AppModLedFixGen:public Module {
+class AppModFixtureGen:public SysModule {
 
 public:
 
-  AppModLedFixGen() :Module("LedFixGen") {};
+  AppModFixtureGen() :SysModule("FixtureGen") {};
 
   void setup() {
-    Module::setup();
+    SysModule::setup();
     USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
     parentVar = ui->initModule(parentVar, name);
 
-    ui->initSelect(parentVar, "ledFixGen", 0, false, [](JsonObject var) { //uiFun
+    ui->initSelect(parentVar, "fixtureGen", 0, false, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "Fixture");
       web->addResponse(var["id"], "comment", "Type of fixture");
       JsonArray select = web->addResponseA(var["id"], "select");
@@ -524,16 +524,16 @@ public:
       select.add("3DCube"); //9
       select.add("3DGlobe WIP"); //10
       select.add("3DGeodesicDome WIP"); //11
-    }, [](JsonObject var) { //chFun
-      ledFixGenChFun(var);
-    }); //ledFixGen
+    }, [this](JsonObject var) { //chFun
+      fixtureGenChFun(var);
+    }); //fixtureGen
 
     ui->initText(parentVar, "pinList", "16", 32, false, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "comment", "One or more e.g. 12,13,14");
     });
 
     ui->initButton(parentVar, "generate", nullptr, false, [](JsonObject var) { //uiFun
-    }, [](JsonObject var) {
+    }, [this](JsonObject var) {
       generateChFun(var);
     });
 
@@ -541,7 +541,7 @@ public:
   }
 
   void loop() {
-    // Module::loop();
+    // SysModule::loop();
   }
 
   enum Fixtures
@@ -562,7 +562,7 @@ public:
   };
 
   //generate dynamic html for fixture controls
-  static void ledFixGenChFun(JsonObject var) {
+  void fixtureGenChFun(JsonObject var) {
     JsonObject parentVar = mdl->findVar(var["id"]);
     parentVar.remove("n"); //tbd: we should also remove the uiFun and chFun !!
     uint8_t value = var["value"];
@@ -590,13 +590,13 @@ public:
       ui->initNumber(parentVar, "height", 8, 1, 255);
 
       ui->initSelect(parentVar, "firstLedX", 0, false, [](JsonObject var) { //uiFun
-        // web->addResponse(var["id"], "label", "Ledfix generator");
+        // web->addResponse(var["id"], "label", "fixture generator");
         JsonArray select = web->addResponseA(var["id"], "select");
         select.add("Left"); //0
-        select.add("Richt"); //1
+        select.add("Right"); //1
       });
       ui->initSelect(parentVar, "firstLedY", 0, false, [](JsonObject var) { //uiFun
-        // web->addResponse(var["id"], "label", "Ledfix generator");
+        // web->addResponse(var["id"], "label", "fixture generator");
         JsonArray select = web->addResponseA(var["id"], "select");
         select.add("Top"); //0
         select.add("Bottom"); //1
@@ -620,9 +620,9 @@ public:
     web->sendDataWs(parentVar); //always send, also when no children, to remove them from ui
   }
 
-  static void generateChFun(JsonObject var) {
+  void generateChFun(JsonObject var) {
 
-    uint8_t fix = mdl->getValue("ledFixGen");
+    uint8_t fix = mdl->getValue("fixtureGen");
 
     GenFix genFix;
 
@@ -760,22 +760,22 @@ public:
 
     files->filesChange();
 
-    //reload ledfix select
-    ui->processUiFun("ledFix");
+    //reload fixture select
+    ui->processUiFun("fixture");
   }
 
-  static File openFile(const char * name) {
-    char fileName[30] = "/";
-    strncat(fileName, name, sizeof(fileName)-1);
-    strncat(fileName, ".json", sizeof(fileName)-1);
+  // File openFile(const char * name) {
+  //   char fileName[30] = "/";
+  //   strncat(fileName, name, sizeof(fileName)-1);
+  //   strncat(fileName, ".json", sizeof(fileName)-1);
 
-    File f = files->open(fileName, "w");
-    if (!f)
-      USER_PRINTF("ledFixGen Could not open file %s for writing\n", fileName);
+  //   File f = files->open(fileName, "w");
+  //   if (!f)
+  //     USER_PRINTF("fixtureGen Could not open file %s for writing\n", fileName);
 
-    return f;
-  }
+  //   return f;
+  // }
 
 };
 
-static AppModLedFixGen *lfg;
+static AppModFixtureGen *lfg;

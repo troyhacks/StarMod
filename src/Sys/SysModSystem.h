@@ -10,23 +10,24 @@
 
 #pragma once
 
-#include "Module.h"
+#include "SysModule.h"
 
 #include "ArduinoJson.h"
 
-class SysModSystem:public Module {
+class SysModSystem:public SysModule {
 
 public:
-  static char version[16];
+  char version[16] = "";
 
   SysModSystem();
   void setup();
   void loop();
+  void loop1s();
+  void loop10s();
 
 
 private:
   unsigned long loopCounter = 0;
-  unsigned long tenSecondMillis = 0;
 
   void addResetReasonsSelect(JsonArray select);
   void addRestartReasonsSelect(JsonArray select);

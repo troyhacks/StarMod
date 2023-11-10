@@ -1,6 +1,6 @@
 /*
    @title     StarMod
-   @file      Module.h
+   @file      SysModule.h
    @date      20231016
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
@@ -13,17 +13,16 @@
 
 #include "ArduinoJson.h"
 
-class Module {
+class SysModule {
 
 public:
   const char * name;
   bool success;
   bool isEnabled;
-  unsigned long secondMillis = 0; // Feels like it should be private, bit doesn't compile if set as such
 
   JsonObject parentVar;
 
-  Module(const char * name) {
+  SysModule(const char * name) {
     this->name = name;
     success = true;
     isEnabled = true;
@@ -32,6 +31,8 @@ public:
   virtual void setup() {}
 
   virtual void loop() {}
+  virtual void loop1s() {}
+  virtual void loop10s() {}
 
   virtual void connectedChanged() {onOffChanged();}
   virtual void enabledChanged() {onOffChanged();}

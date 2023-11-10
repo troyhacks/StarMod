@@ -8,13 +8,13 @@
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 */
 
-#include "Module.h"
+#include "SysModule.h"
 #include "SysModPrint.h"
 #include "SysModUI.h"
 #include "SysModModel.h"
 #include "SysModWeb.h"
 
-SysModPrint::SysModPrint() :Module("Print") {
+SysModPrint::SysModPrint() :SysModule("Print") {
   // print("%s %s\n", __PRETTY_FUNCTION__, name);
 
   Serial.begin(115200);
@@ -24,7 +24,7 @@ SysModPrint::SysModPrint() :Module("Print") {
 };
 
 void SysModPrint::setup() {
-  Module::setup();
+  SysModule::setup();
 
   // print("%s %s\n", __PRETTY_FUNCTION__, name);
 
@@ -58,6 +58,8 @@ size_t SysModPrint::print(const char * format, ...) {
   va_list args;
 
   va_start(args, format);
+
+  Serial.print(strncmp(pcTaskGetTaskName(NULL), "loopTask", 8) == 0?"λ":"α"); //looptask / asyncTCP task
 
   for (size_t i = 0; i < strlen(format); i++) 
   {
@@ -114,7 +116,7 @@ void SysModPrint::printVar(JsonObject var) {
 }
 
 size_t SysModPrint::printJson(const char * text, JsonVariantConst source) {
-  Serial.printf("%s ", text);
+  print("%s ", text);
   size_t size = serializeJson(source, Serial); //for the time being
   Serial.println();
   return size;
@@ -134,5 +136,16 @@ size_t SysModPrint::fFormat(char * buf, size_t size, const char * format, ...) {
 }
 
 void SysModPrint::printJDocInfo(const char * text, DynamicJsonDocument source) {
-  print("%s  %u / %u (%u%%) (%u %u %u)\n", text, source.memoryUsage(), source.capacity(), 100 * source.memoryUsage() / source.capacity(), source.size(), source.overflowed(), source.nesting());
+  uint8_t percentage;
+  if (source.capacity() == 0)
+    percentage = 100;
+  else
+    percentage = 100 * source.memoryUsage() / source.capacity();
+  print("%s  %u / %u (%u%%) (%u %u %u)\n", text, source.memoryUsage(), source.capacity(), percentage, source.size(), source.overflowed(), source.nesting());
 }
+
+void SysModPrint::printClient(const char * text, AsyncWebSocketClient * client) {
+  print("%s client: %d %s q:%d l:%d s:%d (#:%d)\n", text, client?client->id():-1, client?client->remoteIP().toString().c_str():"No", client->queueIsFull(), client->queueLength(), client->status(), client->server()->count());
+  //status: { WS_DISCONNECTED, WS_CONNECTED, WS_DISCONNECTING }
+}
+
