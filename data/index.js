@@ -15,8 +15,9 @@ let userFunId = "";
 let htmlGenerated = false;
 let jsonValues = {};
 let uiFunCommands = [];
-let model = null; //model.json (as send by the server)
+let model = null; //model.json (as send by the server), used by FindVar
 let savedView = null;
+let savedData = {};
 
 function gId(c) {return d.getElementById(c);}
 function cE(e) { return d.createElement(e); }
@@ -61,7 +62,7 @@ function makeWS() {
           if (Array.isArray(json)) {
             model = json; //this is the model
             console.log("WS receive generateHTML", model);
-            generateHTML(null, model); //no parentNode
+            generateHTML(model); //no parentNode
             htmlGenerated = true;
 
             if (savedView)
@@ -80,7 +81,7 @@ function makeWS() {
         else { //update
           if (!Array.isArray(json)) //only the model is an array
             // console.log("WS receive update", json);
-            processUpdate(json);
+            receiveData(json);
         }
       }
     }
@@ -117,301 +118,286 @@ function linearToLogarithm(json, value) {
   return Math.round(result);
 }
 
-function generateHTML(parentNode, json, rowNr = -1) {
-  // console.log("generateHTML", parentNode, json);
+function generateHTML(json, parentNode = null, rowNr = -1) {
+  // console.log("generateHTML", json, parentNode);
   if (Array.isArray(json)) {
+    //sort according to o value
     json.sort(function(a,b) {
-      // Turn your strings into dates, and then subtract them
-      // to get a value that is either negative, positive, or zero.
-      return a.o - b.o; //o is order nr
+      return Math.abs(a.o) - Math.abs(b.o); //o is order nr (ignore negatives for the time being)
     });
-    for (var node of json) //if isArray then variables of array
-      generateHTML(parentNode, node);
+    for (var variable of json) //if isArray then variables of array
+      generateHTML(variable, parentNode, rowNr);
   }
-  else {
+  else { // json is variable
+    let  variable = json;
     //if root (type module) add the html to one of the screen columns
     if (parentNode == null) {
       parentNode = gId("screenColumn" + screenColumnNr);
       screenColumnNr = (screenColumnNr +1)%nrOfScreenColumns;
     }
 
-    if (json) {
-    if (json.id == "System") {
-      console.log("view", json);
-      if (json.view) 
-        savedView = json.view;
-    }
+    //if System, set the current view
+    if (variable && variable.id) {
+      if (variable.id == "System") {
+        //get the current view
+        console.log("view", variable);
+        if (variable.view) 
+          savedView = variable.view;
+      }
     }
     else {
-      console.log("json no ?", json);
+      console.log("genHTML no variable and id", variable, parentNode); //tbd: caused by more data then columns in table...
       return;
     }
 
-    var newNode = null; //newNode will be appended to the parentNode after if then else
+    let newNode = null; //newNode will be appended to the parentNode after if then else and returned
+    let valueNode; //the node containing the variable
+    let rangeValueNode = null;
+    // let buttonSaveNode = null;
+    // let buttonCancelNode = null;
 
     let ndivNeeded = true; //for details ("n"), module and table do not need an extra div for details
+       
+    let labelNode = cE("label"); //set labelNode before if, will be used in if then else
+    labelNode.innerText = initCap(variable.id); // the default when not overridden by uiFun
     
-    //set labelNode before if, will be used in if then else
-    let labelNode = cE("label");
-    labelNode.innerText = initCap(json.id);
+    let isPartOfTableRow = (rowNr != -1);
 
-    let isPartOfTable = (rowNr != -1);
+    if (!isPartOfTableRow) {
+      newNode = cE("p");
+      if (variable.type != "button") newNode.appendChild(labelNode); //add label (tbd:must be done by childs n table cell)
+    }
 
-    if (json.type == "module") {
+    let parentNodeType = parentNode.nodeName.toLocaleLowerCase();
+    
+    if (variable.type == "module") {
       ndivNeeded = false;
-      newNode = cE("div");
-      newNode.id = json.id
-      newNode.draggable = true;
-      newNode.className = "screenBox";
+      valueNode = cE("div");
+      // valueNode.draggable = true;
+      valueNode.className = "screenBox";
 
       let h2Node = cE("h2");
-      h2Node.innerText = initCap(json.id);
-      newNode.appendChild(h2Node);
+      h2Node.innerText = initCap(variable.id);
+      valueNode.appendChild(h2Node);
 
-      setupScreenBox(newNode);
+      setupScreenBox(valueNode);
     }
-    else if (json.type == "table") {
+    else if (variable.type == "table") {
       ndivNeeded = false;
-      //add label
+
+      //add label in an extra row
       let pNode = cE("p");
       pNode.appendChild(labelNode);
       parentNode.appendChild(pNode); //add the table label to the parent
 
       //add table
-      newNode = cE("table");
-      newNode.id = json.id;
-      newNode.className = "table-style"
+      valueNode = cE("table");
+      valueNode.className = "table-style"
 
       let theadNode = cE("thead");
-      let trNode = cE("tr");
-      theadNode.appendChild(trNode);
-      newNode.appendChild(theadNode); //row for header
+      theadNode.appendChild(cE("tr"));
+      valueNode.appendChild(theadNode); //row for header
 
-      newNode.appendChild(cE("tbody"));
+      valueNode.appendChild(cE("tbody"));
+
+      //variable.n will add the columns
     }
-    else { //primitive types
-
+    else if (parentNodeType == "table") { 
+      // console.log("tableChild", parentNode, parentNode.firstChild.firstChild, variable);
       //table header //no newNode created
-      if (parentNode.nodeName.toLocaleLowerCase() == "table") { //table add the id in the header
-        let thNode = cE("th");
-        thNode.id = json.id;
-        thNode.innerText = initCap(json.id); //label uiFun response can change it
-        parentNode.firstChild.firstChild.appendChild(thNode); //<thead><tr>
-      } else {
+      //table add the id in the header
+      //rowNr = -1 for th so uiFun will be called and processed in changeHTML
+      valueNode = cE("th");
+      // valueNode.id = variable.id;
+      valueNode.innerText = initCap(variable.id); //label uiFun response can change it
+      parentNode.firstChild.firstChild.appendChild(valueNode); //<thead><tr> (containing th)
+
+      // newNode = valueNode;
+    } else if (variable.type == "select") {
+
+      if (variable.ro) { //e.g. for reset/restart reason: do not show a select but only show the selected option
+        valueNode = cE("span");
+        if (variable.value) valueNode.innerText = variable.value;
         
-        if (json.type == "select") {
-          //if part of a table, use the saved list of options, otheriwise create select and uiFun will get the options
+        if (savedData[variable.id]) {
+          // console.log("genHTML select table get savedData", valueNode, variable, savedData[variable.id]);
+          changeHTML(valueNode, {"data":savedData[variable.id]});
+        }
+      }
+      else {
+        //<p> with <label><select> (<comment> in receiveData)
 
-          //newNode has no id here ...
+        valueNode = cE("select");
+        valueNode.addEventListener('change', (event) => {console.log("select change", event);sendValue(event.target);});
 
-          if (!isPartOfTable) {
-            newNode = cE("p");
-            if (json.type != "button") newNode.appendChild(labelNode); //add label
+        if (isPartOfTableRow) {
+          //   valueNode.innerHTML = gId(variable.id).innerHTML; //gId(variable.id) is the <th> where uiFun assigned to option values to
+          if (savedData[variable.id]) {
+            // console.log("genHTML select table get savedData", valueNode, variable, savedData[variable.id]);
+            changeHTML(valueNode, {"data":savedData[variable.id]});
           }
+        }
+      }
+    }
+    else if (variable.type == "canvas") {
+      //<p><label><span><canvas>
 
-          let valueNode;
-          if (json.ro) { //e.g. for reset/restart reason: do not show a select but only show the selected option
-            valueNode = cE("span");
-            if (json.value) valueNode.innerText = json.value;
+      if (!isPartOfTableRow) {
+        let pNode = cE("p");
+        pNode.appendChild(labelNode);
+        //3 lines of code to only add 🔍
+        let spanNode = cE("span");
+        spanNode.innerText= "🔍";
+        pNode.appendChild(spanNode);
+        parentNode.appendChild(pNode); //add the table label to the parent
+      }
+
+      valueNode = cE("canvas");
+      // valueNode.id = variable.id;
+      valueNode.addEventListener('dblclick', (event) => {toggleModal(event.target);});
+    }
+    else if (variable.type == "textarea") {
+      if (!isPartOfTableRow) {
+        let pNode = cE("p");
+        pNode.appendChild(labelNode);
+        //3 lines of code to only add 🔍
+        let spanNode = cE("span");
+        spanNode.innerText= "🔍";
+        pNode.appendChild(spanNode);
+        parentNode.appendChild(pNode); //add the table label to the parent
+      }
+
+      valueNode = cE("textarea");
+      valueNode.readOnly = variable.ro;
+      valueNode.addEventListener('dblclick', (event) => {toggleModal(event.target);});
+
+      if (variable.value) valueNode.innerText = variable.value;
+    }
+    else if (variable.type == "url") {
+
+      valueNode = cE("a");
+      valueNode.setAttribute('href', variable.value);
+      // valueNode.setAttribute('target', "_blank"); //does not work well on mobile
+      valueNode.innerText = variable.value;
+
+    } else { //input
+
+      //type specific actions
+      if (variable.type == "checkbox") {
+        valueNode = cE("input");
+        valueNode.type = variable.type;
+        valueNode.disabled = variable.ro;
+        if (variable.value) valueNode.checked = variable.value;
+        valueNode.addEventListener('change', (event) => {console.log(variable.type + " change", event);sendValue(event.target);});
+      } else if (variable.type == "button") {
+        valueNode = cE("input");
+        valueNode.type = variable.type;
+        valueNode.disabled = variable.ro;
+        valueNode.value = initCap(variable.id);
+        valueNode.addEventListener('click', (event) => {console.log(variable.type + " click", event);sendValue(event.target);});
+      } else if (variable.type == "range") {
+        valueNode = cE("input");
+        valueNode.type = variable.type;
+        valueNode.min = variable.min?variable.min:0;
+        valueNode.max = variable.max?variable.max:255; //range slider default 0..255
+        valueNode.disabled = variable.ro;
+        if (variable.value) valueNode.value = variable.value;
+        //numerical ui value changes while draging the slider (oninput)
+        valueNode.addEventListener('input', (event) => {
+          if (gId(variable.id + "_rv")) {
+            gId(variable.id + "_rv").innerText = variable.log?linearToLogarithm(variable, event.target.value):event.target.value;
+          }
+        });
+        //server value changes after draging the slider (onchange)
+        valueNode.addEventListener('change', (event) => {
+          sendValue(event.target);
+        });
+        rangeValueNode = cE("span");
+        rangeValueNode.id = variable.id + "_rv"; //rangeValue
+        if (variable.value) rangeValueNode.innerText = variable.log?linearToLogarithm(variable, variable.value):variable.value;
+      } else {
+        //input types: text, search, tel, url, email, and password.
+
+        if (variable.ro && variable.type != "button") {
+          valueNode = cE("span");
+          if (variable.value) valueNode.innerText = variable.value;
+        } else {
+          valueNode = cE("input");
+          valueNode.type = variable.type;
+          if (variable.value) valueNode.value = variable.value;
+          valueNode.addEventListener('change', (event) => {console.log(variable.type + " change", event);sendValue(event.target);});
+          // if (["text", "password", "number"].includes(variable.type) ) {
+          //   buttonSaveNode = cE("text");
+          //   buttonSaveNode.innerText = "✅";
+          //   buttonSaveNode.addEventListener('click', (event) => {console.log(variable.type + " click", event);});
+          //   buttonCancelNode = cE("text");
+          //   buttonCancelNode.innerText = "🛑";
+          //   buttonCancelNode.addEventListener('click', (event) => {console.log(variable.type + " click", event);});
+          // }
+          if (variable.type == "number") {
+            valueNode.min = variable.min?variable.min:0; //if not specified then unsigned value (min=0)
+            if (variable.max) valueNode.max = variable.max;
           }
           else {
-            //<p> with <label><select> (<comment> in processUpdate)
-
-            valueNode = cE("select");
-            valueNode.addEventListener('change', (event) => {console.log("select change", event);setSelect(event.target);});
-
-            if (isPartOfTable) {
-              // console.log("genHTML select table", parentNode, json, rowNr, gId(json.id), gId(json.id).innerText, gId(json.id).innerHTML);
-              valueNode.innerHTML = gId(json.id).innerHTML; //gId(json.id) is the <th> where uiFun assigned to option values to
-              // let index = 0;
-              // // for (var value of json.select) {
-              // for (var i=0; i<20;i++) {
-              //   let optNode = cE("option");
-              //   optNode.value = index;
-              //   optNode.text = i;
-              //   valueNode.appendChild(optNode);
-              //   index++;
-              // }
-            }
-          }
-
-          if (!isPartOfTable) {
-            valueNode.id = json.id;
-            newNode.appendChild(valueNode);
-          } else {
-            valueNode.id = json.id + "#" + rowNr;
-            newNode = valueNode;
+            if (variable.max) valueNode.setAttribute('maxlength', variable.max); //for text and textarea set max length valueNode.maxlength is not working for some reason
+            if (variable.id == "serverName")
+              gId("instanceName").innerText = variable.value;
           }
         }
-        else if (json.type == "canvas") {
-          //<p><label><span><canvas>
-          let pNode = cE("p");
-          pNode.appendChild(labelNode);
+      } //not checkbox or button or range
 
-          //3 lines of code to only add 🔍
-          let valueNode = cE("span");
-          valueNode.innerText= "🔍";
-          pNode.appendChild(valueNode);
-          
-          parentNode.appendChild(pNode);
-
-          newNode = cE("canvas");
-          newNode.id = json.id;
-          newNode.addEventListener('dblclick', (event) => {toggleModal(event.target);});
-        }
-        else if (json.type == "textarea") {
-          let pNode = cE("p");
-          pNode.appendChild(labelNode);
-          parentNode.appendChild(pNode);
-
-          newNode = cE("textarea");
-          newNode.id = json.id;
-          newNode.readOnly = json.ro;
-          newNode.addEventListener('dblclick', (event) => {toggleModal(event.target);});
-
-          if (json.value) newNode.innerText = json.value;
-          // newNode.appendChild(textareaNode);
-          pNode.innerText += "🔍";
-        }
-        else if (json.type == "url") {
-          //tbd: th and table row outside this if
-          if (!isPartOfTable) {
-            newNode = cE("p");
-            if (json.type != "button") newNode.appendChild(labelNode); //add label
-          }
+    } //input type
     
-          let valueNode = cE("a");
-          valueNode.setAttribute('href', json.value);
-          // valueNode.setAttribute('target', "_blank"); //does not work well on mobile
-          valueNode.innerText = json.value;
+    if (variable.type == "module" || variable.type == "table" || variable.type == "canvas" || variable.type == "textarea" || parentNodeType == "table") {
+      valueNode.id = variable.id;
+      newNode = valueNode;
+    } else if (!isPartOfTableRow) {
+      // console.log(valueNode, variable);
+      valueNode.id = variable.id;
+      newNode.appendChild(valueNode); //add to <p>
+    } else {
+      valueNode.id = variable.id + "#" + rowNr;
+      newNode = valueNode;
+    }
+
+    if (rangeValueNode) newNode.appendChild(rangeValueNode); //_rv value of range / sliders
+    // if (buttonSaveNode) newNode.appendChild(buttonSaveNode);
+    // if (buttonCancelNode) newNode.appendChild(buttonCancelNode);
     
-          if (!isPartOfTable) {
-            valueNode.id = json.id;
-            newNode.appendChild(valueNode);
-          } else {
-            valueNode.id = json.id + "#" + rowNr;
-            newNode = valueNode;
-          }
-        } else { //input
-          if (!isPartOfTable) {
-            newNode = cE("p");
-            if (json.type != "button") newNode.appendChild(labelNode); //add label
-          }
+    //disable drag of parent screenBox
+    if (variable.type != "module") {
+      valueNode.draggable = true;
+      valueNode.addEventListener('dragstart', (event) => {event.preventDefault(); event.stopPropagation();});
+    }
 
-          let rangeValueNode = null;
-          // let buttonSaveNode = null;
-          // let buttonCancelNode = null;
+    if (parentNodeType != "table") parentNode.appendChild(newNode); //add new node to parent
 
-          let valueNode;
+    if (variable.n && parentNodeType != "table") { //multiple details
+      //add a div with _n extension and details have this as parent
+      if (ndivNeeded) {
+        let divNode = cE("div");
+        divNode.id = variable.id + "_n";
+        divNode.className = "ndiv";
+        newNode.parentNode.appendChild(divNode); // add to the parent of the node
+        generateHTML(variable.n, divNode, rowNr);
+      }
+      else
+        generateHTML(variable.n, newNode, rowNr); //details (e.g. module)
+    }
 
-          //type specific actions
-          if (json.type == "checkbox") {
-            valueNode = cE("input");
-            valueNode.type = json.type;
-            valueNode.disabled = json.ro;
-            if (json.value) valueNode.checked = json.value;
-            valueNode.addEventListener('change', (event) => {console.log(json.type + " change", event);setCheckbox(event.target);});
-          } else if (json.type == "button") {
-            valueNode = cE("input");
-            valueNode.type = json.type;
-            valueNode.disabled = json.ro;
-            valueNode.value = initCap(json.id);
-            valueNode.addEventListener('click', (event) => {console.log(json.type + " click", event);setButton(event.target);});
-          } else if (json.type == "range") {
-            valueNode = cE("input");
-            valueNode.type = json.type;
-            valueNode.min = json.min?json.min:0;
-            valueNode.max = json.max?json.max:255; //range slider default 0..255
-            valueNode.disabled = json.ro;
-            if (json.value) valueNode.value = json.value;
-            //numerical ui value changes while draging the slider (oninput)
-            valueNode.addEventListener('input', (event) => {
-              if (gId(json.id + "_rv")) {
-                gId(json.id + "_rv").innerText = json.log?linearToLogarithm(json, event.target.value):event.target.value;
-              }
-            });
-            //server value changes after draging the slider (onchange)
-            valueNode.addEventListener('change', (event) => {
-              setInput(event.target);
-            });
-            rangeValueNode = cE("span");
-            rangeValueNode.id = json.id + "_rv"; //rangeValue
-            if (json.value) rangeValueNode.innerText = json.log?linearToLogarithm(json, json.value):json.value;
-          } else {
-            //input types: text, search, tel, url, email, and password.
-
-            if (json.ro && json.type != "button") {
-              valueNode = cE("span");
-              if (json.value) valueNode.innerText = json.value;
-            } else {
-              valueNode = cE("input");
-              valueNode.type = json.type;
-              if (json.value) valueNode.value = json.value;
-              valueNode.addEventListener('change', (event) => {console.log(json.type + " change", event);setInput(event.target);});
-              // if (["text", "password", "number"].includes(json.type) ) {
-              //   buttonSaveNode = cE("text");
-              //   buttonSaveNode.innerText = "✅";
-              //   buttonSaveNode.addEventListener('click', (event) => {console.log(json.type + " click", event);});
-              //   buttonCancelNode = cE("text");
-              //   buttonCancelNode.innerText = "🛑";
-              //   buttonCancelNode.addEventListener('click', (event) => {console.log(json.type + " click", event);});
-              // }
-              if (json.type == "number") {
-                valueNode.min = json.min?json.min:0; //if not specified then unsigned value (min=0)
-                if (json.max) valueNode.max = json.max;
-              }
-              else {
-                if (json.max) valueNode.setAttribute('maxlength', json.max); //for text and textarea set max length valueNode.maxlength is not working for some reason
-                if (json.id == "serverName")
-                  gId("instanceName").innerText = json.value;
-              }
-            }
-          } //not checkbox or button or range
-
-          if (!isPartOfTable) {
-            valueNode.id = json.id;
-            newNode.appendChild(valueNode);
-          } else {
-            valueNode.id = json.id + "#" + rowNr;
-            newNode = valueNode;
-          }
-
-          if (rangeValueNode) newNode.appendChild(rangeValueNode); //_rv value of range / sliders
-          // if (buttonSaveNode) newNode.appendChild(buttonSaveNode);
-          // if (buttonCancelNode) newNode.appendChild(buttonCancelNode);
-        } //input type
-
-        //disable drag of parent screenBox
-        newNode.draggable = true;
-        newNode.addEventListener('dragstart', (event) => {event.preventDefault(); event.stopPropagation();});
-      } //table header
-    } //primitive types
-
-    if (newNode) parentNode.appendChild(newNode); //add new node to parent
-
-    //don't call uiFun on rowNrs (for the moment)
-    if (!isPartOfTable) {
+    //don't call uiFun on table rows (the table header calls uiFun and propagate this to table row columns in changeHTML when needed - e.g. select)
+    if (!isPartOfTableRow) {
       //call ui Functionality, if defined (to set label, comment, select etc)
-      if (json.uiFun >= 0) { //>=0 as element in var
-        uiFunCommands.push(json.id);
-        if (uiFunCommands.length > 8) { //every 10 vars (to respect responseDoc size) check WS_EVT_DATA info
+      if (variable.uiFun >= 0) { //>=0 as element in var
+        uiFunCommands.push(variable.id);
+        if (uiFunCommands.length > 8) { //every 8 vars (to respect responseDoc size) check WS_EVT_DATA info
           flushUIFunCommands();
         }
       }
-      
-      if (json.n) { //multple details
-        //add a div with _n extension and details have this as parent
-        if (ndivNeeded) {
-          let divNode = cE("div");
-          divNode.id = json.id + "_n";
-          divNode.classList.add("ndiv");
-          newNode.appendChild(divNode);
-          generateHTML(divNode, json.n, rowNr);
-        }
-        else
-          generateHTML(newNode, json.n, rowNr); //details (e.g. module)
-      }
     }
+      
+    // if (rowNr != -1)
+    //   newNode.id += "#" + rowNr;
     return newNode;
   } //not an array
 }
@@ -426,99 +412,204 @@ function flushUIFunCommands() {
   }
 }
 
-function processUpdate(json) {
-  // console.log("processUpdate", json);
-  if (json.id) { //this is a var object
-    console.log("processUpdate variable", gId(json.id), json.n);
-    if (gId(json.id + "_n")) 
-      gId(json.id + "_n").remove();
-    if (json.n) {
-      let divNode = cE("div");
-      divNode.id = json.id + "_n";
-      divNode.classList.add("ndiv");
-      gId(json.id).parentNode.appendChild(divNode);
-      generateHTML(divNode, json.n);
-    }
-    flushUIFunCommands(); //make sure uiFuns of new elements are called
-  }
-  else { //uiFun or {variable:{label:value}}
+//process json from server, json is assumed to be an object
+function receiveData(json) {
+  // console.log("receiveData", json);
+
+  if (Object.keys(json)) {
     for (var key of Object.keys(json)) {
-      if (key != "uiFun") { //was the request
+      let value = json[key];
+      //special commands
+      if (key == "uiFun") {
+        console.log("receiveData no action", key, value); //should not happen anymore
+      }
+      else if (key == "view") { //should not happen anymore
+        console.log("receiveData no action", key, value);
+      }
+      else if (key == "canvasData") { //should not happen anymore
+        console.log("receiveData no action", key, value);
+      }
+      else if (key == "details") {
+        let variable = value;
+        //if var object with .n, create .n (e.g. see setEffect and fixtureGenChFun, tbd: )
+        console.log("receiveData details", key, variable);
+        if (gId(variable.id + "_n")) gId(variable.id + "_n").remove(); //remove old ndiv
+
+        //create new ndiv
+        if (variable.n) {
+          let divNode = cE("div");
+          divNode.id = variable.id + "_n";
+          divNode.className = "ndiv";
+          gId(variable.id).parentNode.appendChild(divNode);
+          generateHTML(variable.n, divNode);
+        }
+        flushUIFunCommands(); //make sure uiFuns of new elements are called
+      }
+      else if (key == "updrow") { //update the row of a table
+        // console.log("receiveData", key, value);
+        for (var tableId of Object.keys(value)) {
+          let tableRows = value[tableId];
+          let tableNode = gId(tableId);
+          // console.log("  ", tableNode);
+          if (Array.isArray(tableRows)) {
+            for (let tableRow of tableRows) {
+              // console.log("  ", tableId, tableRow);
+            }
+          }
+          for (var rowNr = 0, row; row = tableNode.rows[rowNr]; rowNr++) {
+            if (rowNr != 0 && row.cells[0].innerText == tableRows[0][0]) {
+              // console.log("  row", i, row);
+              for (var colNr = 0, col; col = row.cells[colNr]; colNr++) { //coll is a <td>
+                // console.log("  cell", i, j, col);
+                changeHTML(col.firstChild, {value:tableRows[0][colNr]}); //<td>.firstChild is the cell e.g. <select>
+              }  
+            }
+          }
+        } //tableId
+      }
+      else { //{variable:{label:value}}
         if (gId(key)) { //is the key a var?
-          processVarNode(gId(key), key, json[key]);
+          changeHTML(gId(key), value);
         }
         else
-          console.log("processUpdate id not found in dom", key, json[key]);
-      } //key != uiFun
+          console.log("receiveData id not found in dom", key, value);
+      }
     } //for keys
-  } //not id
-} //processUpdate
+  } //isObject
+  else
+    console.log("receiveData no Object", object);
+} //receiveData
 
-function processVarNode(node, key, json) {
+//do something with an existing (variable) node, key is an existing node, json is what to do with it
+function changeHTML(node, commandJson) {
   let overruleValue = false;
+
+  let nodeType = node.nodeName.toLocaleLowerCase();
+
+  // let node = gId(node.id);
+  // if (rowNr != -1)
+  //   node = gId(node.id + "#" + rowNr);
   
-  if (json.hasOwnProperty("label")) {
-    if (key != "insTbl") // tbd: table should not update
-      console.log("processVarNode label", key, json.label);
-    if (node.nodeName.toLocaleLowerCase() == "input" && node.type == "button") {
-      node.value = initCap(json.label);
+  if (commandJson.hasOwnProperty("label")) {
+    // if (node.id != "insTbl") // tbd: table should not update
+    //   console.log("changeHTML label", node.id, commandJson.label);
+    if (nodeType == "input" && node.type == "button") {
+      node.value = initCap(commandJson.label);
     }
     else {
       let labelNode;
-      if (node.nodeName.toLocaleLowerCase() == "canvas" || node.nodeName.toLocaleLowerCase() == "table")
-        labelNode = node.previousSibling.firstChild; //<p><label> before <canvas>/<table>
-      else if (node.nodeName.toLocaleLowerCase() == "th") //table header
+      if (nodeType == "canvas" || nodeType == "table")
+        labelNode = node.previousSibling.firstChild; //<p><label> before <canvas> or <table>
+      else if (nodeType == "th") //table header
         labelNode = node; //the <th>
       else
         labelNode = node.parentNode.firstChild; //<label> before <span or input> within <p>
-      labelNode.innerText = initCap(json.label);
+      labelNode.innerText = initCap(commandJson.label);
     }
-  }
-  if (json.hasOwnProperty("comment")) {
-    if (key != "insTbl") // tbd: table should not update
-      console.log("processVarNode comment", key, json.comment);
-    // normal: <p><label><input id><comment></p>
-    // table or canvas <p><label><comment></p><canvas id>
-    // 1) if exist then replace else add
-    let parentNode;
-    if (node.nodeName.toLocaleLowerCase() == "canvas" || node.nodeName.toLocaleLowerCase() == "table")
-      parentNode = node.previousSibling; //<p><label> before <canvas>/<table>
-    else
-      parentNode = node.parentNode;
-    let commentNode = parentNode.querySelector('comment');
-    // console.log("commentNode", commentNode);
-    if (!commentNode) { //create if not exist
-      commentNode = cE("comment");
-      //if a div node exists (for details - ndiv) then place the comment before the div node
-      let divNode = parentNode.querySelector('div');
-      if (divNode)
-        parentNode.insertBefore(commentNode, divNode);
+  } //label
+
+  if (commandJson.hasOwnProperty("comment")) {
+    
+    if (nodeType != "th") { //no comments on table header
+      // normal: <p><label><input id><comment></p>
+      // table or canvas <p><label><comment></p><canvas id>
+      // 1) if exist then replace else add
+      let parentNode;
+      if (nodeType == "canvas" || nodeType == "textarea" || nodeType == "table")
+        parentNode = node.previousSibling; //<p><label> before <canvas> or <table> or <textarea>
       else
-        parentNode.appendChild(commentNode);
-    }
-    commentNode.innerText = json.comment;        
-  }
-  if (json.hasOwnProperty("select")) {
-    console.log("processVarNode select", key, json.select);
-    if (node.nodeName.toLocaleLowerCase() == "span") { //readonly. tbd: only the displayed value needs to be in the select
-      var index = 0;
-      for (var value of json.select) {
-        if (parseInt(node.textContent) == index) {
-          // console.log("processVarNode select1", value, node, node.textContent, index);
-          node.textContent = value; //replace the id by its value
-          // console.log("processVarNode select2", value, node, node.textContent, index);
-          overruleValue = true; //in this case we do not want the value set
-        }
-        index++;
+        parentNode = node.parentNode;
+      
+      // if (node.id != "insTbl") // tbd: table should not update
+      //   console.log("changeHTML comment", node, commandJson.comment);
+
+      let commentNode = parentNode.querySelector('comment');
+      // console.log("commentNode", commentNode);
+      if (!commentNode) { //create if not exist
+        commentNode = cE("comment");
+        //if a div node exists (for details - ndiv) then place the comment before the div node
+        let divNode = parentNode.querySelector('div');
+        if (divNode)
+          parentNode.insertBefore(commentNode, divNode);
+        else
+          parentNode.appendChild(commentNode);
       }
+      commentNode.innerText = commandJson.comment;
     }
-    else { //select
-      var index = 0;
+    else { //th
+      // console.log("changeHTML comment", node, commandJson.comment);
+      let divNode = cE("div");
+      divNode.innerText = node.innerText;
+      node.innerText = "";
+      divNode.classList.add("tooltip");
+      let spanNode = cE("span");
+      spanNode.innerHTML = commandJson.comment;
+      spanNode.classList.add("tooltiptext");
+      divNode.appendChild(spanNode);
+
+      node.appendChild(divNode);
+
+    }
+  } //comment
+
+  if (commandJson.hasOwnProperty("data")) { //replace the body of a table
+    // console.log("changeHTML data", node, commandJson);
+
+    if (nodeType == "table") {
+      //remove table rows
+      let tbodyNode = cE('tbody'); //the tbody of node will be replaced
+      
+      //find model info
+      let variable = findVar(node.id); //node.id is the table where no are the columns
+      // if (node.id != "insTbl") // tbd: table should not update
+      //   console.log("changeHTML table", node.id, commandJson.data);
+
+      //add each row
+      let rowNr = 0;
+      for (var row of commandJson.data) {
+        let trNode = cE("tr");
+        //add each column
+        let colNr = 0;
+        for (var columnRow of row) {              
+          let tdNode = cE("td");
+
+          //call generateHTML to create the variable in the UI
+          // if (variable.id == "insTbl")
+          //   console.log("table cell generateHTML", tdNode, variable, variable.n, colNr, rowNr);
+          let columnVar = variable.n[colNr]; //find the column definition in the model
+          //table cell at row e.g. id: "flName"; type: "text"...
+          let newNode = generateHTML(columnVar, tdNode, rowNr); //no <p><label>
+          if (newNode) {
+            //very strange: gId(newNode.id) is not working here. Delay before it is in the dom??? (workaround create changeHTML function)
+            let updateJson;
+            if (typeof columnRow == 'number' || typeof columnRow == 'boolean')
+              updateJson = `{"value":${columnRow}}`;
+            else
+              updateJson = `{"value":"${columnRow}"}`
+            // console.log("tablecolumn", rowNr, colNr, newNode, columnVar, updateJson, JSON.parse(updateJson), gId(newNode.id));
+            //call changeHTML to give the variable a value
+            changeHTML(newNode, JSON.parse(updateJson));
+          }
+
+          trNode.appendChild(tdNode);
+          colNr++;
+        }
+        tbodyNode.appendChild(trNode);
+        rowNr++;
+      }
+      //replace the table body
+      node.replaceChild(tbodyNode, node.lastChild); //replace <table><tbody> by tbodyNode
+
+      if (node.id == "insTbl")
+        setInstanceTableColumns();
+    }
+    else if (nodeType == "select") {
       //remove all old options first
+      var index = 0;
       while (node.options && node.options.length > 0) {
         node.remove(0);
       }
-      for (var value of json.select) {
+      for (var value of commandJson.data) {
         let optNode = cE("option");
         if (Array.isArray(value)) {
           optNode.value = value[0];
@@ -532,104 +623,83 @@ function processVarNode(node, key, json) {
         index++;
       }
     }
-  }
-  if (json.hasOwnProperty("table")) {
-    //remove table rows
-    let tbodyNode = cE('tbody');
-    
-    //find model info
-    let variable = findVar(key);
-    if (key != "insTbl") // tbd: table should not update
-      console.log("processVarNode table", key, variable, json.table);
-
-    //add each row
-    let rowNr = 0;
-    for (var row of json.table) {
-      let trNode = cE("tr");
-      //add each column
-      let colNr = 0;
-      for (var columnRow of row) {              
-        let tdNode = cE("td");
-
-        //call generateHTML to create the variable in the UI
-        // console.log("table cell generateHTML", tdNode, variable, variable.n, colNr, rowNr);
-        let columnVar = variable.n[colNr];
-        let newNode = generateHTML(tdNode, columnVar, rowNr); //no <p><label>
-        if (newNode) {
-          //very strange: gId(newNode.id) is not working here. Delay before it is in the dom??? (workaround create processVarNode function)
-          let updateJson;
-          if (typeof columnRow == 'number')
-            updateJson = `{"value":${columnRow}}`;
-          else
-            updateJson = `{"value":"${columnRow}"}`
-          // console.log("tablecolumn", rowNr, colNr, newNode, columnVar, updateJson, JSON.parse(updateJson), gId(newNode.id));
-          //call processVarNode to give the variable a value
-          processVarNode(newNode, newNode.id, JSON.parse(updateJson));
+    else if (nodeType == "span") { //readonly select. tbd: only the displayed value needs to be in the select
+      var index = 0;
+      for (var value of commandJson.data) {
+        if (parseInt(node.textContent) == index) {
+          // console.log("changeHTML select1", value, node, node.textContent, index);
+          node.textContent = value; //replace the id by its value
+          // console.log("changeHTML select2", value, node, node.textContent, index);
+          overruleValue = true; //in this case we do not want the value set
         }
-
-        trNode.appendChild(tdNode);
-        colNr++;
+        index++;
       }
-      tbodyNode.appendChild(trNode);
-      rowNr++;
     }
-    //replace the table body
-    node.replaceChild(tbodyNode, node.lastChild); //replace <table><tbody> by tbodyNode
-    if (node.id == "insTbl")
-      setInstanceTableColumns();
-  }
-  if (json.hasOwnProperty("value") && !overruleValue) { //after select, in case used
-    //hasOwnProperty needed to catch also boolean json.value when it is false
-    // if (key=="mdlEnabled" || key=="clIsFull" || key=="pin2")
-    //   console.log("processVarNode value", key, json, json.value, node);
-    if (node.nodeName.toLocaleLowerCase() == "span") //read only vars
-      node.textContent = json.value;
-    else if (node.nodeName.toLocaleLowerCase() == "a") { //url links
+    else { //data not assigned (e.g. table headers) -> store when needed
+        // console.log("changeHTML savedData", nodeType, node, commandJson);
+        savedData[node.id] = commandJson.data;
+    }
+
+  } //data
+
+  if (commandJson.hasOwnProperty("value") && !overruleValue) { //overruleValue: select sets already the option
+    //hasOwnProperty needed to catch also boolean commandJson.value when it is false
+    // if (node.id=="pro" || node.id=="insfx")// || node.id=="mdlEnabled" || node.id=="clIsFull" || node.id=="pin2")
+    //   console.log("changeHTML value", node.id, commandJson, commandJson.value, node);
+    if (nodeType == "span") //read only vars
+      node.textContent = commandJson.value;
+    else if (nodeType == "a") { //url links
       node.innerText = "🔍";
-      node.setAttribute('href', json.value);
-    } else if (node.nodeName.toLocaleLowerCase() == "canvas")
-      userFunId = key; //prepare for websocket data
+      node.setAttribute('href', commandJson.value);
+    } else if (nodeType == "canvas")
+      userFunId = node.id; //prepare for websocket data
     else if (node.type == "checkbox")
-      node.checked = json.value;
-    else if (Array.isArray(json.value)) { //table column
+      node.checked = commandJson.value;
+    else if (node.type == "button") {
+      // console.log("button", node, commandJson);
+      if (commandJson.value) node.value = commandJson.value; //else the id / label is used as button label
+    }
+    else if (Array.isArray(commandJson.value)) { //table column
       let rowNr = 0;
-      for (let x of json.value) {
-        // console.log(key, gId(key + "#" + rowNr), x);
-        if (gId(key + "#" + rowNr) && gId(key + "#" + rowNr).checked)
-          gId(key + "#" + rowNr).checked = x; //tbd support all types!!
+      for (let val of commandJson.value) {
+        // console.log(node.id, gId(node.id + "#" + rowNr), val);
+        if (gId(node.id + "#" + rowNr)) {
+          if (gId(node.id + "#" + rowNr).type == "checkbox")
+            gId(node.id + "#" + rowNr).checked = val;
+          else
+            gId(node.id + "#" + rowNr).value = val;
+        }
         rowNr++;
       }
-      // node.checked = json.value;
-    } else {//inputs
-      node.value = json.value;
+      // node.checked = commandJson.value;
+    } else {//inputs or select
+      node.value = commandJson.value;
       node.dispatchEvent(new Event("input")); // triggers addEventListener('input',...). now only used for input type range (slider), needed e.g. for qlc+ input
     }
+  } //value
+
+  if (commandJson.hasOwnProperty("json")) { //json send html nodes cannot process, store in jsonValues array
+    console.log("changeHTML json", node.id, commandJson.json, node);
+    jsonValues[node.id] = commandJson.json;
   }
-  if (json.hasOwnProperty("json")) { //json send html nodes cannot process, store in jsonValues array
-    console.log("processVarNode json", key, json.json, node);
-    jsonValues[key] = json.json;
-  }
-  if (json.hasOwnProperty("file")) { //json send html nodes cannot process, store in jsonValues array
-    console.log("processVarNode file", key, json.file, node);
+
+  if (commandJson.hasOwnProperty("file")) { //json send html nodes cannot process, store in jsonValues array
+    console.log("changeHTML file", node.id, commandJson.file, node);
   
     //we need to send a request which the server can handle using request variable
     let url = `http://${window.location.hostname}/file`;
-    fetchAndExecute(url, json.file, key, function(key,text) { //send key as parameter
-      // console.log("fetchAndExecute", text); //in case of invalid json
+    fetchAndExecute(url, commandJson.file, node.id, function(id, text) { //send node.id as parameter
+      // console.log("fetchAndExecute", text); //in case of invalid commandJson
       var ledmapJson = JSON.parse(text);
-      jsonValues[key] = ledmapJson;
-      jsonValues[key].new = true;
+      jsonValues[id] = ledmapJson;
+      jsonValues[id].new = true;
       console.log("fetchAndExecute", jsonValues);
     }); 
   }
-}
+} //changeHTML
 
-
-function findVar(id, parent = null) {
+function findVar(id, parent = model) {
   // console.log("findVar", id, parent, model);
-
-  if (!parent)
-    parent = model;
 
   let foundVar = null;
   for( var variable of parent) {
@@ -683,33 +753,30 @@ function requestJson(command) {
   });
 }
 
-function setInput(element) {
+function sendValue(element) {
+  let varId;
+  if (element.id == "saveModel" || element.id == "bSave") {
+    varId = "saveModel";
+    gId("bSave").value = "Save";
+    gId("bSave").disabled = true;
+  }
+  else 
+  {
+    varId = element.id;
+    gId("bSave").value = "Save*";
+    gId("bSave").disabled = false;
+  }
+
   var command = {};
-  command[element.id] = element.value;
-  // console.log("setInput", command);
+  if (element.type == "checkbox")
+    command[varId] = element.checked;
+  else if (element.nodeName.toLocaleLowerCase() == "span")
+    command[varId] = element.innerText;
+  else
+    command[varId] = Number(element.value)?Number(element.value):element.value; //type number is default but html converts numbers in <option> to string
+  // console.log("sendValue", command);
 
-  requestJson(command);
-}
-function setCheckbox(element) {
-  var command = {};
-  command[element.id] = element.checked;
-  // console.log("setCheckbox", command);
-
-  requestJson(command);
-}
-function setButton(element) {
-  var command = {};
-  command[element.id] = element.value;
-  // console.log("setCheckbox", command);
-
-  requestJson(command);
-}
-
-function setSelect(element) {
-  var command = {};
-  command[element.id] = element.value;
-  // console.log("setInput", command);
-
+  
   requestJson(command);
 }
 
@@ -924,6 +991,8 @@ function setInstanceTableColumns() {
   for (; columnNr<thead.firstChild.childNodes.length; columnNr++) {
     showHideColumn(columnNr, !toStage);
   }
+
+  gId("sma").parentNode.hidden = toStage; //hide sync master label field and comment
 }
 
 function showHideModules(node) {
@@ -939,15 +1008,16 @@ function showHideModules(node) {
       element.parentNode.replaceChild(child, element); //replace by child
       // gId("instPH").remove();
     }
+    setInstanceTableColumns();
   }
 
   let sysMods = ["Files", "Print", "System","Network","Model", "Pins", "Modules", "Web", "UI", "Instances"];
-  let panelParentNode = gId("System").parentNode.parentNode;
+  let panelParentNode = gId("screenColumn0").parentNode;
   // console.log("showHideModules", node, node.value, node.id, panelParentNode, panelParentNode.childNodes);
 
   gId("vApp").style.background = "none";
   gId("vStage").style.background = "none";
-  gId("vUser").style.background = "none";
+  // gId("vUser").style.background = "none";
   gId("vSys").style.background = "none";
   gId("vAll").style.background = "none";
   node.style.backgroundColor = "#FFFFFF";
@@ -975,9 +1045,6 @@ function showHideModules(node) {
 
       toggleInstances(true);
 
-      //set insColumns maximal
-      setInstanceTableColumns();
-
       // for (let child of insTrNode.childNodes) {
       //   child.hidden = false;
       // }
@@ -994,9 +1061,6 @@ function showHideModules(node) {
       }
 
       toggleInstances(false);
-
-      //set insColumns minimal
-      setInstanceTableColumns();
       
       // for (let child of insTrNode.childNodes) {
       //   child.hidden = !insCols.includes(child.id);
@@ -1006,6 +1070,9 @@ function showHideModules(node) {
 
       break;
     case "vAll":
+      toggleInstances(false); //put Instance back if needed
+      setInstanceTableColumns();
+
       //set all modules visible
       for (let screenColumn of panelParentNode.childNodes) {
         for (let child of screenColumn.childNodes) {
@@ -1014,9 +1081,17 @@ function showHideModules(node) {
       }
       break;
   }
+
+  //save the current view
   var command = {};
   command["view"] = node.id;
   // console.log("setInput", command);
 
   requestJson(command);
+} //showHideModules
+
+function saveModel(node) {
+  console.log("saveModel", node);
+
+  sendValue(node);
 }

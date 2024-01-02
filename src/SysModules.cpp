@@ -12,6 +12,7 @@
 #include "Sys/SysModPrint.h"
 #include "Sys/SysModUI.h"
 #include "Sys/SysModWeb.h"
+#include "Sys/SysModModel.h"
 
 bool SysModules::newConnection = false;
 bool SysModules::isConnected = false;
@@ -34,7 +35,7 @@ void SysModules::setup() {
   JsonObject tableVar = ui->initTable(parentVar, "mdlTbl", nullptr, false, [this](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Modules");
     web->addResponse(var["id"], "comment", "List of modules");
-    JsonArray rows = web->addResponseA(var["id"], "table");
+    JsonArray rows = web->addResponseA(var["id"], "data");
     for (SysModule *module:modules) {
       JsonArray row = rows.createNestedArray();
       row.add(module->name);  //create a copy!
@@ -51,49 +52,42 @@ void SysModules::setup() {
   ui->initCheckBox(tableVar, "mdlEnabled", true, false, [](JsonObject var) { //uiFun not readonly! (tbd)
     //initially set to true, but as enabled are table cells, will be updated to an array
     web->addResponse(var["id"], "label", "Enabled");
-  }, [this](JsonObject var) { //chFun
-    print->printJson("mdlEnabled.chFun", var);
-    uint8_t rowNr = 0;
+  }, [this](JsonObject var, uint8_t rowNr) { //chFun
 
-    //if value not array, create array
-    if (!var["value"].is<JsonArray>()) //comment if forced to recreate enabled array
-      var.createNestedArray("value");
-
-    //if value array not same size as nr of modules
-    if (var["value"].size() != modules.size()) {
-      for (SysModule *module: modules) {
-        var["value"][rowNr] = module->isEnabled;
-        rowNr++;
-      }
-    } else { //read array and set module enabled
-      for (bool isEnabled:var["value"].as<JsonArray>()) {
-        if ((modules[rowNr]->isEnabled && !isEnabled) || (!modules[rowNr]->isEnabled && isEnabled)) {
-          USER_PRINTF("  mdlEnabled.chFun %d %s: %d->%d\n", rowNr, modules[rowNr]->name, modules[rowNr]->isEnabled, isEnabled);
-          modules[rowNr]->isEnabled = isEnabled;
-          modules[rowNr]->enabledChanged();
-        }
-        rowNr++;
-      }
+    if (rowNr != uint8Max) {
+      modules[rowNr]->isEnabled = var["value"][rowNr];
+      modules[rowNr]->enabledChanged();
     }
+    else {
+      USER_PRINTF(" no rowNr!!");
+    }
+    print->printJson(" ", var);
+
   });
 }
 
 void SysModules::loop() {
-  bool oneSec = false;
+  // bool oneSec = false;
   bool tenSec = false;
-  if (millis() - oneSecondMillis >= 1000) {
-    oneSecondMillis = millis();
-    oneSec = true;
-  }
-  if (millis() - tenSecondMillis >= 10000) {
-    tenSecondMillis = millis();
-    tenSec = true;
-  }
+  // if (millis() - oneSecondMillis >= 1000) {
+  //   oneSecondMillis = millis();
+  //   oneSec = true;
+  // }
+  // if (millis() - tenSecondMillis >= 10000) {
+  //   tenSecondMillis = millis();
+  //   tenSec = true;
+  // }
   for (SysModule *module:modules) {
     if (module->isEnabled && module->success) {
       module->loop();
-      if (oneSec) module->loop1s();
-      if (tenSec) module->loop10s();
+      if (millis() - module->oneSecondMillis >= 1000) {
+        module->oneSecondMillis = millis();
+        module->loop1s();
+      }
+      if (millis() - module->tenSecondMillis >= 10000) {
+        module->tenSecondMillis = millis();
+        module->loop10s();
+      }
       // module->testManager();
       // module->performanceManager();
       // module->dataSizeManager();
@@ -106,6 +100,12 @@ void SysModules::loop() {
     connectedChanged();
   }
 
+}
+
+void SysModules::reboot() {
+  for (SysModule *module:modules) {
+    module->reboot();
+  }
 }
 
 void SysModules::add(SysModule* module) {

@@ -52,14 +52,14 @@ void LedsV::fixtureProjectAndMap() {
       case p_Random:
         break;
       case p_DistanceFromPoint:
-        pointX = 0;
-        pointY = 0;
-        pointZ = 0;
+        // pointX = 0;
+        // pointY = 0;
+        // pointZ = 0;
         break;
-      case p_DistanceFromCentre:
-        pointX = widthP / 2;
-        pointY = heightP / 2;
-        pointZ = depthP / 2;
+      case p_DistanceFromCenter:
+        // pointX = widthP / 2;
+        // pointY = heightP / 2;
+        // pointZ = depthP / 2;
         break;
     }
 
@@ -91,14 +91,14 @@ void LedsV::fixtureProjectAndMap() {
         // USER_PRINTF("projectionNr p:%d f:%d s:%d, %d-%d-%d %d-%d-%d\n", projectionNr, effectDimension, fixtureDimension, x, y, z, uint16CollectList[0], uint16CollectList[1], uint16CollectList[2]);
 
         //processing: buckets
-        uint16_t bucket = -1;
+        uint16_t bucket = uint16Max;
         switch(projectionNr) {
           case p_None:
             break;
           case p_Random:
             break;
           case p_DistanceFromPoint:
-          case p_DistanceFromCentre:
+          case p_DistanceFromCenter:
             if (effectDimension == _1D) {
               if (fixtureDimension == _1D)
                 bucket = distance(x,0, 0,pointX,0,0);
@@ -173,10 +173,10 @@ void LedsV::fixtureProjectAndMap() {
             break;
         }
 
-        if (bucket != (uint16_t)-1) {
+        if (bucket != uint16Max) {
           //post processing: inverse mapping 
           switch(projectionNr) {
-          case p_DistanceFromCentre:
+          case p_DistanceFromCenter:
             switch (effectDimension) {
             case _2D: 
               switch (fixtureDimension) {
@@ -216,10 +216,10 @@ void LedsV::fixtureProjectAndMap() {
             break;
           }
 
-          if (bucket != (uint16_t)-1) {
+          if (bucket != uint16Max) {
             //add physical tables if not present
             if (bucket >= NUM_LEDS_Preview) {
-              USER_PRINTF("mapping add physMap %d>=%d (%d) too big %d\n", bucket, NUM_LEDS_Preview, mappingTable.size(), (uint16_t)-1);
+              USER_PRINTF("mapping add physMap %d>=%d (%d) too big %d\n", bucket, NUM_LEDS_Preview, mappingTable.size(), uint16Max);
             }
             else {
               if (bucket >= mappingTable.size()) {

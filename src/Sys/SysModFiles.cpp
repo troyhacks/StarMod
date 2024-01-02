@@ -38,14 +38,13 @@ void SysModFiles::setup() {
   JsonObject tableVar = ui->initTable(parentVar, "fileTbl", nullptr, false, [this](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Files");
     web->addResponse(var["id"], "comment", "List of files");
-    JsonArray rows = web->addResponseA(var["id"], "table");
+    JsonArray rows = web->addResponseA(var["id"], "data");
     dirToJson(rows);
-
   });
   ui->initText(tableVar, "flName", nullptr, 32, true, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Name");
   });
-  ui->initNumber(tableVar, "flSize", -1, 0, (uint16_t)-1, true, [](JsonObject var) { //uiFun
+  ui->initNumber(tableVar, "flSize", -1, 0, uint16Max, true, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Size (B)");
   });
   ui->initURL(tableVar, "flLink", nullptr, true, [](JsonObject var) { //uiFun
@@ -53,11 +52,22 @@ void SysModFiles::setup() {
   });
   ui->initButton(tableVar, "flDel", "⌫", false, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Delete"); //table header title
-  }, [](JsonObject var) { //chFun
-    print->printJson("chFun", var); //not called yet for buttons...
-    //instead:
-    // processJson k:flDel r:6 (⌫ == ⌫ ? 1)
-    // we want an array for value but :  {"id":"flDel","type":"button","ro":false,"o":23,"uiFun":25,"chFun":26,"value":"⌫"}
+  }, [this, tableVar](JsonObject var, uint8_t rowNr) { //chFun
+
+    if (rowNr != uint8Max) {
+      // call uiFun of tbl to fill responseVariant with files
+      ui->uFunctions[tableVar["uiFun"]](tableVar);
+      //get the table values
+      JsonVariant responseVariant = web->getResponseDoc()->as<JsonVariant>();
+      JsonArray row = responseVariant["fileTbl"]["data"][rowNr];
+      const char * fileName = row[0]; //first column
+      print->printJson("\n", row);
+      removeFiles(fileName, false);
+    }
+    else {
+      USER_PRINTF(" no rowNr!!");
+    }
+    print->printJson(" ", var);
   });
 
   ui->initText(parentVar, "drsize", nullptr, 32, true, [](JsonObject var) { //uiFun
@@ -69,7 +79,7 @@ void SysModFiles::setup() {
 
   ui->initButton(parentVar, "deleteFiles", nullptr, false, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "comment", "All but model.json");
-  }, [this](JsonObject var) {
+  }, [this](JsonObject var, uint8_t) { //chFun
     USER_PRINTF("delete files\n");
     removeFiles("model.json", true); //all but model.json
   });

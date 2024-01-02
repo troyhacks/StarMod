@@ -38,26 +38,33 @@ void SysModSystem::setup() {
   });
   ui->initText(parentVar, "stack", nullptr, 16, true);
 
-  ui->initButton(parentVar, "restart", nullptr, false, nullptr, [](JsonObject var) {  //chFun
-    SysModWeb::ws->closeAll(1012);
+  ui->initButton(parentVar, "reboot", nullptr, false, nullptr, [](JsonObject var, uint8_t) {  //chFun
+    web->ws->closeAll(1012);
+
+    // mdls->reboot(); //not working yet
+    // long dly = millis();
+    // while (millis() - dly < 450) {
+    //   yield();        // enough time to send response to client
+    // }
+    // FASTLED.clear();
     ESP.restart();
   });
 
   ui->initSelect(parentVar, "reset0", (int)rtc_get_reset_reason(0), true, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Reset 0");
     web->addResponse(var["id"], "comment", "Reason Core 0");
-    sys->addResetReasonsSelect(web->addResponseA(var["id"], "select"));
+    sys->addResetReasonsSelect(web->addResponseA(var["id"], "data"));
   });
   if (ESP.getChipCores() > 1)
     ui->initSelect(parentVar, "reset1", (int)rtc_get_reset_reason(1), true, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "Reset 1");
       web->addResponse(var["id"], "comment", "Reason Core 1");
-      sys->addResetReasonsSelect(web->addResponseA(var["id"], "select"));
+      sys->addResetReasonsSelect(web->addResponseA(var["id"], "data"));
     });
   ui->initSelect(parentVar, "restartReason", (int)esp_reset_reason(), true, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Restart");
     web->addResponse(var["id"], "comment", "Reason restart");
-    sys->addRestartReasonsSelect(web->addResponseA(var["id"], "select"));
+    sys->addRestartReasonsSelect(web->addResponseA(var["id"], "data"));
   });
 
   //calculate version in format YYMMDDHH

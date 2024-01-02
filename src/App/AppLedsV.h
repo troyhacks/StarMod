@@ -12,14 +12,14 @@
 #include <vector>
 #include "ArduinoJson.h"
 
-#define NUM_LEDS_Preview 8192
+#define NUM_LEDS_Preview 4096
 
 enum Projections
 {
   p_None,
   p_Random,
   p_DistanceFromPoint,
-  p_DistanceFromCentre,
+  p_DistanceFromCenter,
   p_Reverse,
   p_Mirror,
   p_Multiply,
@@ -57,6 +57,7 @@ public:
   uint16_t heightV = 8; 
   uint16_t depthV = 1; 
 
+  uint8_t fx = -1;
   uint8_t projectionNr = -1;
   uint8_t fixtureNr = -1;
   uint8_t effectDimension = -1;

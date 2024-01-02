@@ -76,6 +76,34 @@ public:
   virtual void loop() {}
 
   virtual bool controls(JsonObject parentVar) {return false;}
+
+  void addPalette(JsonObject parentVar) {
+    JsonObject currentVar = ui->initSelect(parentVar, "pal", 4, false, [](JsonObject var) { //uiFun.
+      web->addResponse(var["id"], "label", "Palette");
+      JsonArray select = web->addResponseA(var["id"], "data");
+      select.add("CloudColors");
+      select.add("LavaColors");
+      select.add("OceanColors");
+      select.add("ForestColors");
+      select.add("RainbowColors");
+      select.add("RainbowStripeColors");
+      select.add("PartyColors");
+      select.add("HeatColors");
+    }, [](JsonObject var, uint8_t) { //chFun
+      switch (var["value"].as<uint8_t>()) {
+        case 0: palette = CloudColors_p; break;
+        case 1: palette = LavaColors_p; break;
+        case 2: palette = OceanColors_p; break;
+        case 3: palette = ForestColors_p; break;
+        case 4: palette = RainbowColors_p; break;
+        case 5: palette = RainbowStripeColors_p; break;
+        case 6: palette = PartyColors_p; break;
+        case 7: palette = HeatColors_p; break;
+        default: palette = PartyColors_p; break;
+      }
+    });
+    currentVar["stage"] = true;
+  }
 };
 
 class SolidEffect: public Effect {
@@ -197,6 +225,7 @@ public:
     }
   }
   bool controls(JsonObject parentVar) {
+    addPalette(parentVar);
     return false;
   }
 };
@@ -312,6 +341,7 @@ public:
     blur2d(ledsP, ledsV.widthP, ledsV.heightP, mdl->getValue("blur")); //this is tricky as FastLed is not aware of our virtual 
   }
   bool controls(JsonObject parentVar) {
+    addPalette(parentVar);
     ui->initSlider(parentVar, "BPM", 60);
     ui->initSlider(parentVar, "intensity", 128);
     ui->initSlider(parentVar, "blur", 128);
@@ -476,6 +506,7 @@ public:
     }
   }
   bool controls(JsonObject parentVar) {
+    addPalette(parentVar);
     ui->initSlider(parentVar, "speed", 128, 1, 255); //start with speed 1
     ui->initSlider(parentVar, "Offset X", 128);
     ui->initSlider(parentVar, "Offset Y", 128);
@@ -528,6 +559,7 @@ public:
     }
   }
   bool controls(JsonObject parentVar) {
+    addPalette(parentVar);
     ui->initSlider(parentVar, "X frequency", 64);
     ui->initSlider(parentVar, "Fade rate", 128);
     ui->initSlider(parentVar, "Speed", 128);
@@ -612,6 +644,7 @@ public:
   }
 
   bool controls(JsonObject parentVar) {
+    addPalette(parentVar);
     ui->initSlider(parentVar, "gravity", 128);
     ui->initSlider(parentVar, "balls", 8, 1, 16);
     return true;
@@ -748,6 +781,7 @@ public:
   }
 
   bool controls(JsonObject parentVar) {
+    addPalette(parentVar);
     ui->initSlider(parentVar, "fadeOut", 255);
     ui->initSlider(parentVar, "ripple", 128);
     ui->initCheckBox(parentVar, "colorBars");
@@ -760,6 +794,7 @@ public:
       if (e131mod->isEnabled) {
         e131mod->patchChannel(3, "fadeOut", 255); // TODO: add constant for name
         e131mod->patchChannel(4, "ripple", 255);
+        ui->processUiFun("e131Tbl");
       }
 
     #endif
@@ -810,7 +845,75 @@ public:
   }
 
   bool controls(JsonObject parentVar) {
+    addPalette(parentVar);
     ui->initCheckBox(parentVar, "inWards");
+    return true;
+  }
+};
+
+class FreqMatrix:public Effect {
+public:
+  const char * name() {
+    return "FreqMatrix 1D";
+  }
+
+  void setup() {
+    fadeToBlackBy( ledsP, ledsV.nrOfLedsP, 16);
+  }
+
+  void loop() {
+    sharedData.allocate(sizeof(uint8_t));
+    uint8_t *aux0 = sharedData.bind<uint8_t>();
+    if (!sharedData.allocated()) return;
+
+    uint8_t speed = mdl->getValue("Speed");
+    uint8_t fx = mdl->getValue("Sound effect");
+    uint8_t lowBin = mdl->getValue("Low bin");
+    uint8_t highBin = mdl->getValue("High bin");
+    uint8_t sensitivity10 = mdl->getValue("Sensivity");
+
+    uint8_t *fftResult = wledAudioMod->fftResults;
+
+    uint8_t secondHand = (speed < 255) ? (micros()/(256-speed)/500 % 16) : 0;
+    if((speed > 254) || (*aux0 != secondHand)) {   // WLEDMM allow run run at full speed
+      *aux0 = secondHand;
+
+      // Pixel brightness (value) based on volume * sensitivity * intensity
+      // uint_fast8_t sensitivity10 = map(sensitivity, 0, 31, 10, 100); // reduced resolution slider // WLEDMM sensitivity * 10, to avoid losing precision
+      int pixVal = wledAudioMod->sync.volumeSmth * (float)fx * (float)sensitivity10 / 2560.0f; // WLEDMM 2560 due to sensitivity * 10
+      if (pixVal > 255) pixVal = 255;  // make a brightness from the last avg
+
+      CRGB color = CRGB::Black;
+
+      if (wledAudioMod->sync.FFT_MajorPeak > MAX_FREQUENCY) wledAudioMod->sync.FFT_MajorPeak = 1;
+      // MajorPeak holds the freq. value which is most abundant in the last sample.
+      // With our sampling rate of 10240Hz we have a usable freq range from roughtly 80Hz to 10240/2 Hz
+      // we will treat everything with less than 65Hz as 0
+
+      if ((wledAudioMod->sync.FFT_MajorPeak > 80.0f) && (wledAudioMod->sync.volumeSmth > 0.25f)) { // WLEDMM
+        // Pixel color (hue) based on major frequency
+        int upperLimit = 80 + 42 * highBin;
+        int lowerLimit = 80 + 3 * lowBin;
+        //uint8_t i =  lowerLimit!=upperLimit ? map(FFT_MajorPeak, lowerLimit, upperLimit, 0, 255) : FFT_MajorPeak;  // (original formula) may under/overflow - so we enforce uint8_t
+        int freqMapped =  lowerLimit!=upperLimit ? map(wledAudioMod->sync.FFT_MajorPeak, lowerLimit, upperLimit, 0, 255) : wledAudioMod->sync.FFT_MajorPeak;  // WLEDMM preserve overflows
+        uint8_t i = abs(freqMapped) & 0xFF;  // WLEDMM we embrace overflow ;-) by "modulo 256"
+
+        color = CHSV(i, 240, (uint8_t)pixVal); // implicit conversion to RGB supplied by FastLED
+      }
+
+      // shift the pixels one pixel up
+      ledsV.setPixelColor(0, color);
+      for (int i = ledsV.nrOfLedsV - 1; i > 0; i--) ledsV.setPixelColor(i, ledsV.getPixelColor(i-1));
+    }
+  }
+
+  bool controls(JsonObject parentVar) {
+    ui->initSlider(parentVar, "Speed", 255);
+    ui->initSlider(parentVar, "Sound effect", 128);
+    ui->initSlider(parentVar, "Low bin", 18);
+    ui->initSlider(parentVar, "High bin", 48);
+    ui->initSlider(parentVar, "Sensivity", 30, 10, 100);
+
     return true;
   }
 };
@@ -843,6 +946,7 @@ public:
     #ifdef USERMOD_WLEDAUDIO
       effects.push_back(new GEQEffect);
       effects.push_back(new AudioRings);
+      effects.push_back(new FreqMatrix);
     #endif
   }
 
@@ -851,32 +955,32 @@ public:
     // for (Effect *effect:effects) {
     //     USER_PRINTF("Size of %s is %d\n", effect->name(), sizeof(*effect));
     // }
-    USER_PRINTF("Size of %s is %d\n", "RainbowEffect", sizeof(RainbowEffect));
-    USER_PRINTF("Size of %s is %d\n", "RainbowWithGlitterEffect", sizeof(RainbowWithGlitterEffect));
-    USER_PRINTF("Size of %s is %d\n", "SinelonEffect", sizeof(SinelonEffect));
-    USER_PRINTF("Size of %s is %d\n", "RunningEffect", sizeof(RunningEffect));
-    USER_PRINTF("Size of %s is %d\n", "ConfettiEffect", sizeof(ConfettiEffect));
-    USER_PRINTF("Size of %s is %d\n", "BPMEffect", sizeof(BPMEffect));
-    USER_PRINTF("Size of %s is %d\n", "JuggleEffect", sizeof(JuggleEffect));
-    USER_PRINTF("Size of %s is %d\n", "Ripples3DEffect", sizeof(Ripples3DEffect));
-    USER_PRINTF("Size of %s is %d\n", "SphereMove3DEffect", sizeof(SphereMove3DEffect));
-    USER_PRINTF("Size of %s is %d\n", "Frizzles2D", sizeof(Frizzles2D));
-    USER_PRINTF("Size of %s is %d\n", "Lines2D", sizeof(Lines2D));
-    USER_PRINTF("Size of %s is %d\n", "DistortionWaves2D", sizeof(DistortionWaves2D));
-    USER_PRINTF("Size of %s is %d\n", "Octopus2D", sizeof(Octopus2D));
-    USER_PRINTF("Size of %s is %d\n", "Lissajous2D", sizeof(Lissajous2D));
-    USER_PRINTF("Size of %s is %d\n", "BouncingBalls1D", sizeof(BouncingBalls1D));
-    USER_PRINTF("Size of %s is %d\n", "RingRandomFlow", sizeof(RingRandomFlow));
-    #ifdef USERMOD_WLEDAUDIO
-      USER_PRINTF("Size of %s is %d\n", "GEQEffect", sizeof(GEQEffect));
-      USER_PRINTF("Size of %s is %d\n", "AudioRings", sizeof(AudioRings));
-    #endif
+    // USER_PRINTF("Size of %s is %d\n", "RainbowEffect", sizeof(RainbowEffect));
+    // USER_PRINTF("Size of %s is %d\n", "RainbowWithGlitterEffect", sizeof(RainbowWithGlitterEffect));
+    // USER_PRINTF("Size of %s is %d\n", "SinelonEffect", sizeof(SinelonEffect));
+    // USER_PRINTF("Size of %s is %d\n", "RunningEffect", sizeof(RunningEffect));
+    // USER_PRINTF("Size of %s is %d\n", "ConfettiEffect", sizeof(ConfettiEffect));
+    // USER_PRINTF("Size of %s is %d\n", "BPMEffect", sizeof(BPMEffect));
+    // USER_PRINTF("Size of %s is %d\n", "JuggleEffect", sizeof(JuggleEffect));
+    // USER_PRINTF("Size of %s is %d\n", "Ripples3DEffect", sizeof(Ripples3DEffect));
+    // USER_PRINTF("Size of %s is %d\n", "SphereMove3DEffect", sizeof(SphereMove3DEffect));
+    // USER_PRINTF("Size of %s is %d\n", "Frizzles2D", sizeof(Frizzles2D));
+    // USER_PRINTF("Size of %s is %d\n", "Lines2D", sizeof(Lines2D));
+    // USER_PRINTF("Size of %s is %d\n", "DistortionWaves2D", sizeof(DistortionWaves2D));
+    // USER_PRINTF("Size of %s is %d\n", "Octopus2D", sizeof(Octopus2D));
+    // USER_PRINTF("Size of %s is %d\n", "Lissajous2D", sizeof(Lissajous2D));
+    // USER_PRINTF("Size of %s is %d\n", "BouncingBalls1D", sizeof(BouncingBalls1D));
+    // USER_PRINTF("Size of %s is %d\n", "RingRandomFlow", sizeof(RingRandomFlow));
+    // #ifdef USERMOD_WLEDAUDIO
+    //   USER_PRINTF("Size of %s is %d\n", "GEQEffect", sizeof(GEQEffect));
+    //   USER_PRINTF("Size of %s is %d\n", "AudioRings", sizeof(AudioRings));
+    // #endif
   }
 
-  void loop(size_t index) {
+  void loop(uint8_t fx) {
     now = millis(); //tbd timebase
 
-    effects[index%effects.size()]->loop();
+    effects[fx%effects.size()]->loop();
 
     call++;
 
@@ -887,20 +991,26 @@ public:
     return effects.size();
   }
 
-  bool setEffect(const char * id, size_t index) {
+  bool setEffect(JsonObject parentVar, uint8_t rowNr) {
     bool doMap = false;
 
-    USER_PRINTF("setEffect %d %d %d \n", index, effects.size(), size());
-    if (index < size()) {
+    if (rowNr == uint8Max)
+      ledsV.fx = parentVar["value"];
+    else
+      ledsV.fx = parentVar["value"][rowNr];
+
+    USER_PRINTF("setEffect %d\n", ledsV.fx);
+
+    if (ledsV.fx < size()) {
 
       //tbd: make property of effects
-      if (strstr(effects[index]->name(), "2D")) {
+      if (strstr(effects[ledsV.fx]->name(), "2D")) {
         if (ledsV.effectDimension != 2) {
           ledsV.effectDimension = 2;
           doMap = true;
         }
       }
-      else if (strstr(effects[index]->name(), "3D")) {
+      else if (strstr(effects[ledsV.fx]->name(), "3D")) {
         if (ledsV.effectDimension != 3) {
           ledsV.effectDimension = 3;
           doMap = true;
@@ -915,15 +1025,22 @@ public:
 
       sharedData.clear(); //make sure all values are 0
 
-      JsonObject parentVar = mdl->findVar(id);
       parentVar.remove("n"); //tbd: we should also remove the uiFun and chFun !!
 
-      Effect* effect = effects[index];
+      Effect* effect = effects[ledsV.fx];
       effect->controls(parentVar);
+
       effect->setup(); //if changed then run setup once (like call==0 in WLED)
 
-      print->printJson("parentVar", parentVar);
-      web->sendDataWs(parentVar); //always send, also when no children, to remove them from ui
+      JsonDocument *responseDoc = web->getResponseDoc();
+      responseDoc->clear(); //needed for deserializeJson?
+      JsonObject responseObject = responseDoc->to<JsonObject>();
+
+      responseObject["details"] = parentVar;
+
+      print->printJson("parentVar", responseObject);
+      web->sendDataWs(responseObject); //always send, also when no children, to remove them from ui
+
     } // fx < size
 
     return doMap;

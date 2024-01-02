@@ -12,9 +12,11 @@
 
 #include <vector>
 #include "ArduinoJson.h"
-#include "UserModE131.h"
-
-#define uint8Null 255U
+#ifdef USERMOD_E131
+  #include "UserModE131.h"
+#endif
+// #include "Sys/SysModSystem.h" //for sys->version
+#include <HTTPClient.h> //need to be replaced by udp messages as this is a memory sucker
 
 struct DMX {
   uint8_t universe:3; //3 bits / 8
@@ -29,14 +31,50 @@ struct SysData {
   DMX dmx;
 };
 
-struct AppData {
-  char varID[3];
+struct VarData {
+  char id[3];
   uint8_t value;
 }; //4
 
-//note: changing SysData and AppData sizes: all instances should have the same version so change with care
-
 #define nrOfAppVars 20
+
+struct AppData {
+  VarData vars[nrOfAppVars]; //total 80
+
+  int getVar(const char * varID) { //int to support -1
+    for (int i=0; i< nrOfAppVars; i++) {
+      if (strncmp(vars[i].id, "", 3) != 0 && strncmp(vars[i].id, varID, 3) == 0) {
+        return vars[i].value;
+      }
+    }
+    return -1;
+  }
+  
+  void setVar(const char * varID, uint8_t value) {
+    size_t foundAppVar;
+    for (int i=0; i< nrOfAppVars; i++) {
+      if (strncmp(vars[i].id, "", 3) == 0)
+        foundAppVar = i;
+      else if (strncmp(vars[i].id, varID, 3) == 0) {
+        foundAppVar = i;
+        break; //use this slot
+      }
+    }
+    size_t i = foundAppVar;
+    if (strncmp(vars[i].id, "", 3) == 0) strncpy(vars[i].id, varID, 3);
+    vars[i].value = value;
+  }
+
+  void initVars() {
+    for (int i=0; i< nrOfAppVars; i++) {
+      strncpy(vars[i].id, "", 3);
+      vars[i].value = 0;
+    }
+  }
+
+};
+
+//note: changing SysData and AppData sizes: all instances should have the same version so change with care
 
 struct NodeInfo {
   IPAddress ip;
@@ -44,7 +82,8 @@ struct NodeInfo {
   uint32_t version;
   unsigned long timeStamp; //when was the package received, used to check on aging
   SysData sys;
-  AppData app[nrOfAppVars]; //total 80
+  AppData app; //total 80
+
 };
 
 struct UDPWLEDMessage {
@@ -64,8 +103,8 @@ struct UDPWLEDMessage {
 struct UDPStarModMessage {
   UDPWLEDMessage header; // 44 bytes fixed!
   SysData sys;
-  AppData app[nrOfAppVars]; //total 80
-  char body[1460 - sizeof(UDPWLEDMessage) - sizeof(SysData) - sizeof(AppData) * nrOfAppVars];
+  AppData app;
+  char body[1460 - sizeof(UDPWLEDMessage) - sizeof(SysData) - sizeof(AppData)];
 };
 
 //WLED syncmessage
@@ -108,6 +147,28 @@ public:
     USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
   };
 
+  void addTblRow(JsonVariant rows, std::vector<NodeInfo>::iterator node) {
+    JsonArray row = rows.createNestedArray();
+    row.add((char *)node->name);
+    char urlString[32] = "http://";
+    strncat(urlString, node->ip.toString().c_str(), sizeof(urlString)-1);
+    row.add((char *)urlString);  //create a copy!
+    row.add((char *)node->ip.toString().c_str());
+    // row.add(node->timeStamp / 1000);
+
+    row.add(node->sys.type?"StarMod":"WLED");
+
+    row.add(node->version);
+    row.add(node->sys.upTime);
+
+    mdl->findVars("stage", true, [node, row](JsonObject var) { //findFun
+      //look for value in node
+      int value = node->app.getVar(var["id"]);
+      // USER_PRINTF("insTbl %s %s: %d\n", node->name, varID, value);
+      row.add(value);
+    });
+  }
+
   //setup filesystem
   void setup() {
     SysModule::setup();
@@ -119,41 +180,9 @@ public:
     const char * varID = var["id"];
       web->addResponse(varID, "label", "Instances");
       web->addResponse(varID, "comment", "List of instances");
-      JsonArray rows = web->addResponseA(varID, "table");
-      for (auto node=nodes.begin(); node!=nodes.end(); ++node) {
-        JsonArray row = rows.createNestedArray();
-        row.add((char *)node->name);
-        char urlString[32] = "http://";
-        strncat(urlString, node->ip.toString().c_str(), sizeof(urlString)-1);
-        row.add((char *)urlString);  //create a copy!
-        row.add((char *)node->ip.toString().c_str());
-        // row.add(node->timeStamp / 1000);
-        char text[100] = "";
-        if (node->sys.type == 0) {
-          row.add("WLED");
-        }
-        else {
-          row.add("StarMod");
-          print->fFormat(text, sizeof(text)-1, "d:%d:%d-%d", node->sys.dmx.universe, node->sys.dmx.start, node->sys.dmx.start + node->sys.dmx.count - 1);
-        }
-
-        row.add(node->version);
-        row.add(node->sys.upTime);
-
-        mdl->findVars("stage", true, [node, row](JsonObject var) { //findFun
-          //look for value in node
-          const char * varID = var["id"];
-          uint8_t value = uint8Null;
-          for (AppData kv:node->app) {
-            if (strncmp(kv.varID, "", 3) != 0 && strncmp(kv.varID, varID, 3) == 0) {
-              value = kv.value;
-            }
-          }
-          // USER_PRINTF("insTbl %s %s: %d\n", node->name, varID, value);
-          row.add(value);
-        });
-
-        row.add(text);
+      JsonArray rows = web->addResponseA(varID, "data");
+      for (auto node=this->nodes.begin(); node!=this->nodes.end(); ++node) {
+        addTblRow(rows, node);
       }
     });
     ui->initText(tableVar, "insName", nullptr, 32, true, [](JsonObject var) { //uiFun
@@ -181,70 +210,83 @@ public:
 
     JsonObject currentVar;
 
-    currentVar = ui->initSelect(parentVar, "syncMaster", 0, false, [this](JsonObject var) { //uiFun tbd: make dropdown where value is ...ip number
+    currentVar = ui->initSelect(parentVar, "sma", 0, false, [this](JsonObject var) { //uiFun tbd: make dropdown where value is ...ip number
       web->addResponse(var["id"], "label", "Sync Master");
       web->addResponse(var["id"], "comment", "Instance to sync from");
-      JsonArray select = web->addResponseA(var["id"], "select");
+      JsonArray select = web->addResponseA(var["id"], "data");
       JsonArray instanceObject = select.createNestedArray();
       instanceObject.add(0);
       instanceObject.add("no sync");
       for (auto node=nodes.begin(); node!=nodes.end(); ++node) {
-        if (node->ip != WiFi.localIP()) {
-          char option[32] = { 0 };
-          strncpy(option, node->ip.toString().c_str(), sizeof(option)-1);
-          strncat(option, " ", sizeof(option)-1);
-          strncat(option, node->name, sizeof(option)-1);
-          instanceObject = select.createNestedArray();
-          instanceObject.add(node->ip[3]);
-          instanceObject.add(option);
-        }
+        char option[32] = { 0 };
+        strncpy(option, node->ip.toString().c_str(), sizeof(option)-1);
+        strncat(option, " ", sizeof(option)-1);
+        strncat(option, node->name, sizeof(option)-1);
+        instanceObject = select.createNestedArray();
+        instanceObject.add(node->ip[3]);
+        instanceObject.add(option);
       }
-    }, [](JsonObject var) { //chFun
-      ui->valChangedForInstancesTemp = true;
     }); //syncMaster
     currentVar["stage"] = true;
 
-    //find stage variables
-    // JsonVariant x = true;
-    mdl->findVars("stage", true, [tableVar](JsonObject var) { //findFun
+    //find stage variables and add them to the table
+    mdl->findVars("stage", true, [tableVar, this](JsonObject var) { //findFun
+
       USER_PRINTF("stage %s %s found\n", var["id"].as<const char *>(), var["value"].as<String>().c_str());
-      char text[32] = "ins";
-      strcat(text, var["id"]);
-      JsonObject newVar;
-      if (var["type"] == "select") {
-        newVar = ui->initSelect(tableVar, text, 0, false, nullptr, [](JsonObject var) { //chFun
-          USER_PRINTF("flex %s %s changed\n", var["id"].as<const char *>(), var["value"].as<String>().c_str());
-        });
-      }
-      else if (var["type"] == "checkbox") {
-        newVar = ui->initCheckBox(tableVar, text, false, false, nullptr, [](JsonObject var) { //chFun
-          USER_PRINTF("flex %s %d changed\n", var["id"].as<const char *>(), var["value"].as<String>().c_str());
-        });
-      }
-      else if (var["type"] == "range") {
-        newVar = ui->initSlider(tableVar, text, 0, 0, 255, false, nullptr, [](JsonObject var) { //chFun
-          USER_PRINTF("flex %s %d changed\n", var["id"].as<const char *>(), var["value"].as<String>().c_str());
-        });
-      }
-      else if (var["type"] == "number") {
-        newVar = ui->initNumber(tableVar, text, 0, 0, 255, false, nullptr, [](JsonObject var) { //chFun
-          USER_PRINTF("flex %s %d changed\n", var["id"].as<const char *>(), var["value"].as<String>().c_str());
-        });
-      }
-      else
-        USER_PRINTF("flex %s %d type %s not implemented yet\n", var["id"].as<const char *>(), var["value"].as<String>().c_str(), var["type"].as<const char *>());
 
-      if (newVar) newVar["uiFun"] = var["uiFun"];
+      char columnVarID[32] = "ins";
+      strcat(columnVarID, var["id"]);
+      JsonObject newVar; // = ui->cloneVar(var, columnVarID, [this, var](JsonObject newVar){});
+
+      //create a var of the same type. InitVar is not calling chFun which is good in this situation!
+      newVar = ui->initVar(tableVar, columnVarID, var["type"], false, nullptr, [this, var](JsonObject newVar, uint8_t rowNr) { //chFun
+
+        if (rowNr != uint8Max) {
+          //if this node update directly, otherwise send over network
+          if (nodes[rowNr].ip == WiFi.localIP()) {
+            mdl->setValueI(var["id"], newVar["value"][rowNr].as<uint8_t>());
+          } else {
+            // https://randomnerdtutorials.com/esp32-http-get-post-arduino/
+            HTTPClient http;
+            char serverPath[32];
+            print->fFormat(serverPath, sizeof(serverPath)-1, "http://%s/json", nodes[rowNr].ip.toString().c_str());
+            http.begin(serverPath);
+            http.addHeader("Content-Type", "application/json");
+            char postMessage[32];
+            print->fFormat(postMessage, sizeof(postMessage)-1, "{\"%s\":%d}", var["id"].as<const char *>(), newVar["value"][rowNr].as<uint8_t>());
+
+            USER_PRINTF("json post %s %s\n", serverPath, postMessage);
+
+            int httpResponseCode = http.POST(postMessage);
+
+            if (httpResponseCode>0) {
+              Serial.print("HTTP Response code: ");
+              Serial.println(httpResponseCode);
+              String payload = http.getString();
+              Serial.println(payload);
+            }
+            else {
+              Serial.print("Error code: ");
+              Serial.println(httpResponseCode);
+            }
+            // Free resources
+            http.end();
+          }
+        }
+        else {
+          USER_PRINTF(" no rowNr!!");
+        }
+        print->printJson(" ", var);
+
+      });
+
+      if (newVar) {
+        if (!var["min"].isNull()) newVar["min"] = var["min"];
+        if (!var["max"].isNull()) newVar["max"] = var["max"];
+        newVar["uiFun"] = var["uiFun"]; //copy the uiFun
+      }
 
     });
-
-    ui->initText(tableVar, "insDetail", nullptr, 1024, true, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Detail");
-    });
-
-    // ui->initText(currentVar, "insDtdt", nullptr, 1024, true, [](JsonObject var) { //uiFun
-    //   web->addResponse(var["id"], "label", "DetailDetail");
-    // });
 
     if (sizeof(UDPWLEDMessage) != 44) {
       USER_PRINTF("Program error: Size of UDP message is not 44: %d\n", sizeof(UDPWLEDMessage));
@@ -281,11 +323,12 @@ public:
 
     handleNotifications();
 
-    if (ui->valChangedForInstancesTemp) {
-      ui->valChangedForInstancesTemp = false;
+    if (ui->stageVarChanged) {
+      ui->stageVarChanged = false;
       sendSysInfoUDP(); 
     }
   }
+
   void loop10s() {
     sendSysInfoUDP(); 
   }
@@ -305,7 +348,7 @@ public:
       if (packetSize > 0) {
         IPAddress remoteIp = notifierUdp.remoteIP();
 
-        USER_PRINTF("handleNotifications sync %d %d\n", remoteIp[3], packetSize);
+        // USER_PRINTF("handleNotifications sync ...%d %d\n", remoteIp[3], packetSize);
 
         UDPWLEDSyncMessage wledSyncMessage;
         uint8_t *udpIn = (uint8_t *)&wledSyncMessage;
@@ -322,15 +365,15 @@ public:
         node->sys.upTime = (wledSyncMessage.timebase[0] * 256*256*256 + 256*256*wledSyncMessage.timebase[1] + 256*wledSyncMessage.timebase[2] + wledSyncMessage.timebase[3]) / 1000;
         node->sys.syncMaster = wledSyncMessage.syncGroups; //tbd: change
         
-        uint8_t syncMaster = mdl->getValue("syncMaster");
+        uint8_t syncMaster = mdl->getValue("sma");
         if (syncMaster == remoteIp[3]) {
-          if (node->app[0].value != wledSyncMessage.bri) mdl->setValueI("bri", wledSyncMessage.bri);
+          if (node->app.getVar("bri") != wledSyncMessage.bri) mdl->setValueI("bri", wledSyncMessage.bri);
           //only set brightness
         }
 
-        strncpy(node->app[0].varID, "bri", 3); node->app[0].value = wledSyncMessage.bri;
-        strncpy(node->app[1].varID, "fx", 3); node->app[1].value = wledSyncMessage.mainsegMode;
-        strncpy(node->app[2].varID, "pal", 3); node->app[2].value = wledSyncMessage.palette;
+        node->app.setVar("bri", wledSyncMessage.bri);
+        node->app.setVar("fx", wledSyncMessage.mainsegMode); //tbd: rowNr
+        node->app.setVar("pal", wledSyncMessage.palette); //tbd: rowNr
 
         // for (size_t x = 0; x < packetSize; x++) {
         //   char xx = (char)udpIn[x];
@@ -338,6 +381,7 @@ public:
         // }
         // Serial.println();
 
+        USER_PRINTF("insTbl handleNotifications %d\n", remoteIp[3]);
         ui->processUiFun("insTbl");
 
         return;
@@ -350,7 +394,7 @@ public:
 
       if (packetSize > 0) {
         IPAddress remoteIp = instanceUDP.remoteIP();
-        // USER_PRINTF("handleNotifications nodes %s %d check %d or %d\n", remoteIp.toString().c_str(), packetSize, sizeof(UDPWLEDMessage), sizeof(UDPStarModMessage));
+        // USER_PRINTF("handleNotifications nodes ...%d %d check %d or %d\n", remoteIp[3], packetSize, sizeof(UDPWLEDMessage), sizeof(UDPStarModMessage));
 
         if (packetSize == sizeof(UDPWLEDMessage)) { //WLED instance
           UDPStarModMessage starModMessage;
@@ -370,7 +414,7 @@ public:
           updateNode(starModMessage);
         }
         else {
-          //flush the data
+          //read the rest of the data (flush)
           uint8_t udpIn[1472+1];
           notifierUdp.read(udpIn, packetSize);
 
@@ -386,6 +430,7 @@ public:
     for (std::vector<NodeInfo>::iterator node=nodes.begin(); node!=nodes.end(); ) {
       if (millis() - node->timeStamp > 32000) { //assuming a ping each 30 seconds
         node = nodes.erase(node);
+        USER_PRINTF("insTbl remove inactive nodes %d\n", node->ip[3]);
         ui->processUiFun("insTbl");
         ui->processUiFun("ddpInst");
         ui->processUiFun("artInst");
@@ -417,38 +462,32 @@ public:
     starModMessage.header.version = atoi(sys->version);
     starModMessage.sys.type = 1; //StarMod
     starModMessage.sys.upTime = millis()/1000;
-    starModMessage.sys.syncMaster = mdl->getValue("syncMaster");
+    starModMessage.sys.syncMaster = mdl->getValue("sma");
     starModMessage.sys.dmx.universe = 0;
     starModMessage.sys.dmx.start = 0;
     starModMessage.sys.dmx.count = 0;
     #ifdef USERMOD_E131
       if (e131mod->isEnabled) {
-        starModMessage.sys.dmx.universe = mdl->getValue("dmxUni");
-        starModMessage.sys.dmx.start = mdl->getValue("dmxChannel");
+        starModMessage.sys.dmx.universe = mdl->getValue("dun");
+        starModMessage.sys.dmx.start = mdl->getValue("dch");
         starModMessage.sys.dmx.count = 3;//e131->varsToWatch.size();
       }
     #endif
 
-    //send stage values
-    uint8_t counter = 0;
-    mdl->findVars("stage", true, [&starModMessage, &counter](JsonObject var) { //uiFun
-      strncpy(starModMessage.app[counter].varID, var["id"], 3);
-      starModMessage.app[counter].value = var["value"].as<uint8_t>();
-      counter++;
-    });
+    //stage values default 0
+    starModMessage.app.initVars();
 
-    //fill the other slots with empty
-    for (; counter<nrOfAppVars; counter++) {
-      strncpy(starModMessage.app[counter].varID, "", 3);
-      starModMessage.app[counter].value = 0;
-    }
+    //send stage values
+    mdl->findVars("stage", true, [&starModMessage](JsonObject var) { //uiFun
+      starModMessage.app.setVar(var["id"], var["value"]);
+    });
 
     updateNode(starModMessage); //temp? to show own node in list as instance is not catching it's own udp message...
 
     IPAddress broadcastIP(255, 255, 255, 255);
     if (0 != instanceUDP.beginPacket(broadcastIP, instanceUDPPort)) {  // WLEDMM beginPacket == 0 --> error
-      USER_PRINTF("sendSysInfoUDP %s s:%d p:%d i:%d\n", (uint8_t*)&starModMessage, sizeof(UDPStarModMessage), instanceUDPPort, ip[3]);
-      // for (size_t x = 0; x < sizeof(UDPWLEDMessage) + sizeof(SysData) + sizeof(AppData) * 20; x++) {
+      USER_PRINTF("sendSysInfoUDP %s s:%d p:%d i:...%d\n", (uint8_t*)&starModMessage, sizeof(UDPStarModMessage), instanceUDPPort, ip[3]);
+      // for (size_t x = 0; x < sizeof(UDPWLEDMessage) + sizeof(SysData) + sizeof(AppData); x++) {
       //   char * xx = (char *)&starModMessage;
       //   Serial.printf("%d: %d - %c\n", x, xx[x], xx[x]);
       // }
@@ -471,7 +510,7 @@ public:
         found = true;
     }
 
-    // USER_PRINTF("updateNode Instance: %d n:%s b:%s %d\n", ip[3], udpStarMessage.header.name, udpStarMessage.body, found);
+    // USER_PRINTF("updateNode Instance: ...%d n:%s %d\n", ip[3], udpStarMessage.header.name, found);
 
     if (!found) { //new node
       NodeInfo node;
@@ -485,10 +524,7 @@ public:
         node.sys.dmx.count = 0;
         node.sys.syncMaster = 0;
         //stage values default 0
-        for (AppData kv:node.app) {
-          strncpy(kv.varID, "", 3);
-          kv.value = 0;
-        }
+        node.app.initVars();
       }
 
       nodes.push_back(node);
@@ -505,42 +541,64 @@ public:
           node->sys = udpStarMessage.sys;
 
           //check for syncing
-          uint8_t syncMaster = mdl->getValue("syncMaster");
+          uint8_t syncMaster = mdl->getValue("sma");
           if (syncMaster == ip[3]) {
 
             //find matching var
             for (int i=0; i< nrOfAppVars; i++) {
               //set node kv
 
-              //if kv set and found in node, set that value in node
-              if (strncmp(udpStarMessage.app[i].varID, "", 3) != 0 && strncmp(udpStarMessage.app[i].varID, node->app[i].varID, 3) == 0) {
+              VarData newVar = udpStarMessage.app.vars[i];
 
-                if (udpStarMessage.app[i].value != node->app[i].value) {
+              if (strncmp(newVar.id, "", 3) != 0) {
 
+                int value = node->app.getVar(newVar.id);
+
+                //if no value found or value has changed
+                if (value == -1 || value != newVar.value) {
                   char varID[4];
-                  strncpy(varID, node->app[i].varID, 3);
+                  strncpy(varID, newVar.id, 3);
                   varID[3]='\0';
 
-                  USER_PRINTF("AppData3 %s %s %d\n", node->name, varID, udpStarMessage.app[i].value);
-                  mdl->setValueI(varID, udpStarMessage.app[i].value);
+                  USER_PRINTF("AppData3 %s %s %d\n", node->name, varID, newVar.value);
+                  mdl->setValueI(varID, newVar.value);
                 }
-
               }
             }
           } 
 
           //set values to node
           for (int i=0; i< nrOfAppVars; i++)
-            node->app[i] = udpStarMessage.app[i];
+            node->app.vars[i] = udpStarMessage.app.vars[i];
         }
-      }
+
+        //only update cell in instbl!
+        //create a json string
+        //send the json
+        //ui to parse the json
+
+        if (found) {
+          JsonDocument *responseDoc = web->getResponseDoc();
+          responseDoc->clear(); //needed for deserializeJson?
+          JsonVariant responseVariant = responseDoc->as<JsonVariant>();
+
+          JsonArray rows = web->addResponseA("updrow", "insTbl");
+          addTblRow(rows, node);
+
+          web->sendDataWs(responseVariant); //send to all clients
+
+          // print->printJson("updateNode updrow", responseVariant);
+        }
+
+      } //ip
     }
     if (!found) {
       ui->processUiFun("ddpInst"); //show the new instance in the dropdown  
       ui->processUiFun("artInst"); //show the new instance in the dropdown  
-    }
 
-    ui->processUiFun("insTbl");
+      USER_PRINTF("insTbl updateNode %d\n", ip[3]);
+      ui->processUiFun("insTbl");
+    }
 
   }
 

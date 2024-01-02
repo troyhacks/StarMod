@@ -9,17 +9,18 @@
 */
 
 #include "SysModUI.h"
-#include "SysModPrint.h"
 #include "SysModWeb.h"
 #include "SysModModel.h"
 
 #include "html_ui.h"
 
 //init static variables (https://www.tutorialspoint.com/cplusplus/cpp_static_members.htm)
-std::vector<UCFun> SysModUI::ucFunctions;
+std::vector<UFun> SysModUI::uFunctions;
+std::vector<CFun> SysModUI::cFunctions;
 std::vector<VarLoop> SysModUI::loopFunctions;
 int SysModUI::varCounter = 1; //start with 1 so it can be negative, see var["o"]
-bool SysModUI::varLoopsChanged = false;;
+bool SysModUI::varLoopsChanged = false;
+bool SysModUI::stageVarChanged = false;
 
 SysModUI::SysModUI() :SysModule("UI") {
   USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
@@ -47,7 +48,7 @@ void SysModUI::setup() {
   JsonObject tableVar = initTable(parentVar, "vlTbl", nullptr, false, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Variable loops");
     web->addResponse(var["id"], "comment", "Loops initiated by a variable");
-    JsonArray rows = web->addResponseA(var["id"], "table");
+    JsonArray rows = web->addResponseA(var["id"], "data");
 
     for (auto varLoop = begin (loopFunctions); varLoop != end (loopFunctions); ++varLoop) {
       JsonArray row = rows.createNestedArray();
@@ -81,7 +82,7 @@ void SysModUI::loop() {
         SysModWeb::wsSendBytesCounter++;
 
         //send var to notify client data coming is for var (client then knows it is canvas and expects data for it)
-        setChFunAndWs(varLoop->var, "new");
+        setChFunAndWs(varLoop->var, uint8Max, "new");
 
         //send leds info in binary data format
         //tbd: this can crash on 64*64 matrices...
@@ -141,12 +142,20 @@ void SysModUI::loop1s() {
 
 }
 
-JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * type, bool readOnly, UCFun uiFun, UCFun chFun, LoopFun loopFun) {
-  JsonObject var = mdl->findVar(id);
+JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * type, bool readOnly, UFun uiFun, CFun chFun, LoopFun loopFun) {
+  JsonObject var = mdl->findVar(id); //sets the existing modelParentVar
+  const char * modelParentId = mdl->modelParentVar["id"];
+  const char * parentId = parent["id"];
+
+  bool differentParents = modelParentId != nullptr && parentId != nullptr && strcmp(modelParentId, parentId) != 0;
+  //!mdl->modelParentVar.isNull() && !parent.isNull() && mdl->modelParentVar["id"] != parent["id"];
+  if (differentParents) {
+    USER_PRINTF("initVar parents not equal %s: %s != %s\n", id, modelParentId, parentId);
+  }
 
   //create new var
-  if (var.isNull()) {
-    USER_PRINTF("initVar create new %s: %s\n", type, id);
+  if (differentParents || var.isNull()) {
+    USER_PRINTF("initVar create new %s: %s->%s\n", type, parentId, id);
     if (parent.isNull()) {
       JsonArray vars = mdl->model->as<JsonArray>();
       var = vars.createNestedObject();
@@ -157,16 +166,16 @@ JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * ty
     }
     var["id"] = (char *)id; //create a copy!
   }
-  else {
-    USER_PRINT_NOT("Object %s already defined\n", id);
-  }
+  // else {
+  //   USER_PRINTF("initVar Var %s->%s already defined\n", modelParentId, id);
+  // }
 
   if (!var.isNull()) {
     if (var["type"] != type) 
       var["type"] = (char *)type; //create a copy!!
     if (var["ro"] != readOnly) 
       var["ro"] = readOnly;
-    //readOnly's will be deleted, if not already so
+
     var["o"] = -varCounter++; //make order negative to check if not obsolete, see cleanUpModel
 
     //if uiFun, add it to the list
@@ -179,8 +188,8 @@ JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * ty
       // if (itr!=ucFunctions.end()) //found
       //   var["uiFun"] = distance(ucFunctions.begin(), itr); //assign found function
       // else { //not found
-        ucFunctions.push_back(uiFun); //add new function
-        var["uiFun"] = ucFunctions.size()-1;
+        uFunctions.push_back(uiFun); //add new function
+        var["uiFun"] = uFunctions.size()-1;
       // }
     }
 
@@ -191,8 +200,8 @@ JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * ty
       // if (itr!=ucFunctions.end()) //found
       //   var["chFun"] = distance(ucFunctions.begin(), itr); //assign found function
       // else { //not found
-        ucFunctions.push_back(chFun); //add new function
-        var["chFun"] = ucFunctions.size()-1;
+        cFunctions.push_back(chFun); //add new function
+        var["chFun"] = cFunctions.size()-1;
       // }
     }
 
@@ -217,15 +226,20 @@ JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * ty
 
 //tbd: use template T for value
 //run the change function and send response to all? websocket clients
-void SysModUI::setChFunAndWs(JsonObject var, const char * value) { //value: bypass var["value"]
+void SysModUI::setChFunAndWs(JsonObject var, uint8_t rowNr, const char * value) { //value: bypass var["value"]
 
   if (!var["chFun"].isNull()) {//isNull needed here!
     size_t funNr = var["chFun"];
-    if (funNr < ucFunctions.size()) 
-      ucFunctions[funNr](var);
+    if (funNr < cFunctions.size()) {
+      USER_PRINTF("chFun %s r:%d v:%s\n", var["id"].as<const char *>(), rowNr, var["value"].as<String>());
+      cFunctions[funNr](var, rowNr);
+    }
     else    
-      USER_PRINTF("setChFunAndWs function nr %s outside bounds %d >= %d\n", var["id"].as<const char *>(), funNr, ucFunctions.size());
+      USER_PRINTF("setChFunAndWs function nr %s outside bounds %d >= %d\n", var["id"].as<const char *>(), funNr, cFunctions.size());
   }
+
+  if (var["stage"])
+    stageVarChanged = true;
 
   JsonDocument *responseDoc = web->getResponseDoc();
   responseDoc->clear(); //needed for deserializeJson?
@@ -240,14 +254,16 @@ void SysModUI::setChFunAndWs(JsonObject var, const char * value) { //value: bypa
       web->addResponseB(var["id"], "value", var["value"].as<bool>());
     else if (var["value"].is<const char *>())
       web->addResponse(var["id"], "value", var["value"].as<const char *>());
-    else if (var["value"].is<JsonArray>())
+    else if (var["value"].is<JsonArray>()) {
+      USER_PRINTF("setChFunAndWs %s JsonArray %s\n", var["id"].as<const char *>(), var["value"].as<String>().c_str());
       web->addResponseArray(var["id"], "value", var["value"].as<JsonArray>());
+    }
     else {
-      USER_PRINTF("unknown type for %s\n", var["value"].as<String>().c_str());
+      USER_PRINTF("setChFunAndWs %s unknown type for %s\n", var["id"].as<const char *>(), var["value"].as<String>().c_str());
       web->addResponse(var["id"], "value", var["value"]);
     }
-    // if (var["id"] == "pview" || var["id"] == "fx") {
-    //   print->printJson("setChFunAndWs response", responseDoc);
+    // if (var["id"] == "pointX") {
+    //   print->printJson("setChFunAndWs response", responseVariant);
     // }
   }
 
@@ -263,14 +279,20 @@ const char * SysModUI::processJson(JsonVariant &json) {
 
       // commands
       if (pair.key() == "v") {
-        // do nothing as it is no real var bu  the verbose command of WLED
+        // do nothing as it is no real var but the verbose command of WLED
         USER_PRINTF("processJson v type %s\n", pair.value().as<String>());
       }
-      else if (pair.key() == "view") {
-        // do nothing as it is no real var bu  the verbose command of WLED
+      else if (pair.key() == "view") { //save the chosen view in System (see index.js)
         JsonObject var = mdl->findVar("System");
         USER_PRINTF("processJson view v:%s n: %d s:%s\n", pair.value().as<String>(), var.isNull(), var["id"].as<const char *>());
         var["view"] = (char *)value.as<const char *>(); //create a copy!
+        json.remove(key); //key processed we don't need the key in the response
+      }
+      else if (pair.key() == "canvasData") {
+        JsonObject var = mdl->findVar("System");
+        USER_PRINTF("processJson canvasData %s\n", value.as<const char *>());
+        var["canvasData"] = (char *)value.as<const char *>(); //create a copy!
+        json.remove(key); //key processed we don't need the key in the response
       }
       else if (pair.key() == "uiFun") { //JsonString can do ==
         //find the select var and collect it's options...
@@ -281,14 +303,18 @@ const char * SysModUI::processJson(JsonVariant &json) {
               //call ui function...
               if (!var["uiFun"].isNull()) {//isnull needed here!
                 size_t funNr = var["uiFun"];
-                if (funNr < ucFunctions.size())
-                  ucFunctions[funNr](var);
+                if (funNr < uFunctions.size())
+                  uFunctions[funNr](var);
                 else    
-                  USER_PRINTF("processJson function nr %s outside bounds %d >= %d\n", var["id"].as<const char *>(), funNr, ucFunctions.size());
+                  USER_PRINTF("processJson function nr %s outside bounds %d >= %d\n", var["id"].as<const char *>(), funNr, uFunctions.size());
 
                 //if select var, send value back
-                if (var["type"] == "select")
-                  web->addResponseI(var["id"], "value", var["value"]); //temp assume int only
+                if (var["type"] == "select") {
+                  if (var["value"].is<JsonArray>()) //for tables
+                    web->addResponseArray(var["id"], "value", var["value"]);
+                  else
+                    web->addResponseI(var["id"], "value", var["value"]);
+                }
 
                 // print->printJson("PJ Command", responseDoc);
               }
@@ -298,6 +324,7 @@ const char * SysModUI::processJson(JsonVariant &json) {
           }
         } else
           USER_PRINTF("processJson value not array? %s %s\n", key, value.as<String>().c_str());
+        json.remove(key); //key processed we don't need the key in the response
       } 
       else { //normal change
         if (!value.is<JsonObject>()) { //no vars (inserted by uiFun responses)
@@ -320,32 +347,40 @@ const char * SysModUI::processJson(JsonVariant &json) {
             //if value not array we change it anyway
             if (rowNr) {
               //var value should be array
-              if (var["value"].is<JsonArray>())
-                changed = var["value"][atoi(rowNr)] != value;
+              if (var["value"].is<JsonArray>()) {
+                if (value.is<bool>()) {
+                  bool varValue = var["value"][atoi(rowNr)];
+                  bool newValue = value;
+                  changed = (varValue && !newValue) || (!varValue && newValue);
+                }
+                else
+                  changed = var["value"][atoi(rowNr)] != value;
+              }
               else {
-                print->printJson("we want an array for value but : ", var);
+                print->printJson("we want an array for value but var:", var);
+                print->printJson("   value:", value);
                 changed = true; //we should change anyway
               }
             }
             else //normal situation
               changed = var["value"] != value;
 
-            if (changed) {
+            if (var["type"] == "button") //button always
+              setChFunAndWs(var, rowNr?atoi(rowNr):uint8Max, value); //bypass var["value"] 
+            else if (changed) {
               // USER_PRINTF("processJson %s %s->%s\n", key, var["value"].as<String>().c_str(), value.as<String>().c_str());
 
               //set new value
               if (value.is<const char *>())
-                mdl->setValueC(key, value.as<const char *>());
+                mdl->setValueC(key, value.as<const char *>(), rowNr?atoi(rowNr):-1);
               else if (value.is<bool>())
                 mdl->setValueB(key, value.as<bool>(), rowNr?atoi(rowNr):-1);
               else if (value.is<int>())
-                mdl->setValueI(key, value.as<int>());
+                mdl->setValueI(key, value.as<int>(), rowNr?atoi(rowNr):-1);
               else {
                 USER_PRINTF("processJson %s %s->%s not a supported type yet\n", key, var["value"].as<String>().c_str(), value.as<String>().c_str());
               }
             }
-            else if (var["type"] == "button") //button always
-              setChFunAndWs(var); //setValue without assignment
           }
           else
             USER_PRINTF("Object %s not found\n", key);

@@ -500,7 +500,7 @@ class AppModFixtureGen:public SysModule {
 
 public:
 
-  AppModFixtureGen() :SysModule("FixtureGen") {};
+  AppModFixtureGen() :SysModule("Fixture Generator") {};
 
   void setup() {
     SysModule::setup();
@@ -511,7 +511,7 @@ public:
     ui->initSelect(parentVar, "fixtureGen", 0, false, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "Fixture");
       web->addResponse(var["id"], "comment", "Type of fixture");
-      JsonArray select = web->addResponseA(var["id"], "select");
+      JsonArray select = web->addResponseA(var["id"], "data");
       select.add("1DSpiral"); //0
       select.add("2DMatrix"); //1
       select.add("2DRing"); //2
@@ -524,7 +524,7 @@ public:
       select.add("3DCube"); //9
       select.add("3DGlobe WIP"); //10
       select.add("3DGeodesicDome WIP"); //11
-    }, [this](JsonObject var) { //chFun
+    }, [this](JsonObject var, uint8_t) { //chFun
       fixtureGenChFun(var);
     }); //fixtureGen
 
@@ -533,7 +533,7 @@ public:
     });
 
     ui->initButton(parentVar, "generate", nullptr, false, [](JsonObject var) { //uiFun
-    }, [this](JsonObject var) {
+    }, [this](JsonObject var, uint8_t) { //chFun
       generateChFun(var);
     });
 
@@ -591,13 +591,13 @@ public:
 
       ui->initSelect(parentVar, "firstLedX", 0, false, [](JsonObject var) { //uiFun
         // web->addResponse(var["id"], "label", "fixture generator");
-        JsonArray select = web->addResponseA(var["id"], "select");
+        JsonArray select = web->addResponseA(var["id"], "data");
         select.add("Left"); //0
         select.add("Right"); //1
       });
       ui->initSelect(parentVar, "firstLedY", 0, false, [](JsonObject var) { //uiFun
         // web->addResponse(var["id"], "label", "fixture generator");
-        JsonArray select = web->addResponseA(var["id"], "select");
+        JsonArray select = web->addResponseA(var["id"], "data");
         select.add("Top"); //0
         select.add("Bottom"); //1
       });
@@ -617,7 +617,15 @@ public:
       ui->initNumber(parentVar, "width", 24, 1, 16);
     }
 
-    web->sendDataWs(parentVar); //always send, also when no children, to remove them from ui
+    JsonDocument *responseDoc = web->getResponseDoc();
+    responseDoc->clear(); //needed for deserializeJson?
+    JsonObject responseObject = responseDoc->to<JsonObject>();
+
+    responseObject["details"] = parentVar;
+
+    print->printJson("parentVar", responseObject);
+    web->sendDataWs(responseObject); //always send, also when no children, to remove them from ui
+
   }
 
   void generateChFun(JsonObject var) {

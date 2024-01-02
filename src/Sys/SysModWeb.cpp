@@ -60,7 +60,7 @@ void SysModWeb::setup() {
   JsonObject tableVar = ui->initTable(parentVar, "clTbl", nullptr, false, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Clients");
     web->addResponse(var["id"], "comment", "List of clients");
-    JsonArray rows = web->addResponseA(var["id"], "table");
+    JsonArray rows = web->addResponseA(var["id"], "data");
     web->clientsToJson(rows);
   });
   ui->initNumber(tableVar, "clNr", 0, 0, 999, true, [](JsonObject var) { //uiFun
@@ -71,13 +71,11 @@ void SysModWeb::setup() {
   });
   ui->initCheckBox(tableVar, "clIsFull", false, true, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Is full");
-  }, [](JsonObject var) { //chFun
-    print->printJson("clIsFull.chFun", var);
   });
   ui->initSelect(tableVar, "clStatus", -1, true, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Status");
     //tbd: not working yet in ui
-    JsonArray select = web->addResponseA(var["id"], "select");
+    JsonArray select = web->addResponseA(var["id"], "data");
     select.add("Disconnected"); //0
     select.add("Connected"); //1
     select.add("Disconnecting"); //2
@@ -125,6 +123,11 @@ void SysModWeb::loop1s() {
   wsSendBytesCounter = 0;
   mdl->setValueLossy("wsSendJson", "%lu /s", wsSendJsonCounter);
   wsSendJsonCounter = 0;
+}
+
+void SysModWeb::reboot() {
+  USER_PRINTF("SysModWeb reboot\n"); //and this not causes crash ??? whats with name?
+  ws->closeAll(1012);
 }
 
 void SysModWeb::connectedChanged() {
@@ -364,10 +367,10 @@ void SysModWeb::sendDataWs(JsonVariant json, AsyncWebSocketClient * client) {
   }
 
   wsSendDataWsCounter++;
-  if (wsSendDataWsCounter > 1) {
+  while (wsSendDataWsCounter > 1) {
     USER_PRINT_Async("sendDataWs parallel %d %s\n", wsSendDataWsCounter, pcTaskGetTaskName(NULL));
-    wsSendDataWsCounter--;
-    return;
+    // wsSendDataWsCounter--;
+    // return;
   }
 
   wsSendJsonCounter++;
@@ -503,7 +506,7 @@ bool SysModWeb::addUpdate(const char * uri) {
       char message[64];
       const char * serverName = mdl->getValue("serverName");
 
-      print->fFormat(message, sizeof(message)-1, "Update of %s (%d) %s", serverName, WiFi.localIP()[3], Update.end(true)?"Successful":"Failed");
+      print->fFormat(message, sizeof(message)-1, "Update of %s (...%d) %s", serverName, WiFi.localIP()[3], Update.end(true)?"Successful":"Failed");
 
       USER_PRINTF("%s\n", message);
       request->send(200, "text/plain", message);
@@ -544,8 +547,7 @@ bool SysModWeb::setupJsonHandlers(const char * uri, const char * (*processFunc)(
     if (json["v"]) { //WLED compatibility: verbose response
       serveJson (request);
     }
-    else
-    if (responseVariant.size()) { //responseVariant set by processFunc
+    else if (responseVariant.size()) { //responseVariant set by processFunc
       char resStr[200]; 
       serializeJson(responseVariant, resStr, 200);
       USER_PRINT_Async("processJsonUrl response %s\n", resStr);
@@ -607,7 +609,7 @@ void SysModWeb::clientsToJson(JsonArray array, bool nameOnly, const char * filte
     if (nameOnly) {
       array.add((char *)client->remoteIP().toString().c_str()); //create a copy!
     } else {
-      // USER_PRINTF("Client %d %d %s\n", client->id(), client->queueIsFull(), client->remoteIP().toString().c_str());
+      // USER_PRINTF("Client %d %d ...%d\n", client->id(), client->queueIsFull(), client->remoteIP()[3]);
       JsonArray row = array.createNestedArray();
       row.add(client->id());
       row.add((char *)client->remoteIP().toString().c_str()); //create a copy!
@@ -631,17 +633,29 @@ void SysModWeb::serveJson(AsyncWebServerRequest *request) {
   // return model.json
   if (request->url().indexOf("mdl") > 0) {
     JsonArray model = mdl->model->as<JsonArray>();
-    USER_PRINTF("serveJson model %s, %s %d %d %d %d\n", request->client()->remoteIP().toString().c_str(), request->url().c_str(), model.size(),  measureJson(model), model.memoryUsage(), mdl->model->capacity());
+    USER_PRINTF("serveJson model ...%d, %s %d %d %d %d\n", request->client()->remoteIP()[3], request->url().c_str(), model.size(),  measureJson(model), model.memoryUsage(), mdl->model->capacity());
 
     response = new AsyncJsonResponse(true,  model.memoryUsage()); //array tbd: here copy is mode, see WLED for using reference
     JsonArray root = response->getRoot();
 
-    // root = module does not work? so add each element individually
+    // root = model does not work? so add each element individually
     for (JsonObject module: model)
       root.add(module);
   }
+  // nodes crashes!
+  // else if (request->url().indexOf("nodes") > 0) {
+  //   JsonArray model = mdl->model->as<JsonArray>();
+  //   USER_PRINTF("serveJson model ...%d, %s %d %d %d %d\n", request->client()->remoteIP()[3], request->url().c_str(), model.size(),  measureJson(model), model.memoryUsage(), mdl->model->capacity());
+
+  //   response = new AsyncJsonResponse(true, 5000); //array
+  //   JsonArray root = response->getRoot();
+
+  //   for (auto node=instances->nodes.begin(); node!=instances->nodes.end(); ++node) {
+  //     root.add(node->name);
+  //   }
+  // }
   else { //WLED compatible
-    USER_PRINTF("serveJson %s, %s\n", request->client()->remoteIP().toString().c_str(), request->url().c_str());
+    USER_PRINTF("serveJson ...%d, %s\n", request->client()->remoteIP()[3], request->url().c_str());
     response = new AsyncJsonResponse(false, 5000); //object
     JsonObject root = response->getRoot();
 

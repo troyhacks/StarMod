@@ -29,9 +29,9 @@ void SysModNetwork::setup() {
   ui->initPassword(parentVar, "pw", "", 32, false, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "label", "Password");
   });
-  ui->initButton(parentVar, "connect", nullptr, false, [](JsonObject var) {
+  ui->initButton(parentVar, "connect", nullptr, false, [](JsonObject var) { //uiFun
     web->addResponse(var["id"], "comment", "Force reconnect (you loose current connection)");
-  }, [this](JsonObject var) {
+  }, [this](JsonObject var, uint8_t) { //chFun
     forceReconnect = true;
   });
   ui->initText(parentVar, "nwstatus", nullptr, 32, true, [](JsonObject var) { //uiFun
@@ -81,7 +81,7 @@ void SysModNetwork::handleConnection() {
       initAP();
     }
   } else if (!interfacesInited) { //newly connected
-    mdl->setValueP("nwstatus", "Connected %d", WiFi.localIP()[3]);
+    mdl->setValueP("nwstatus", "Connected %d.%d.%d.%d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3]);
 
     interfacesInited = true;
 

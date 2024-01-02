@@ -52,15 +52,13 @@ public:
 
     currentVar = ui->initCheckBox(parentVar, "on", true, false, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "On/Off");
-    }, [](JsonObject var) { //chFun
-      ui->valChangedForInstancesTemp = true;
     });
     currentVar["stage"] = true;
 
     //logarithmic slider (10)
     currentVar = ui->initSlider(parentVar, "bri", 10, 0, 255, false, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "Brightness");
-    }, [](JsonObject var) { //chFun
+    }, [](JsonObject var, uint8_t) { //chFun
       uint8_t bri = var["value"];
 
       uint8_t result = linearToLogarithm(var, bri);
@@ -68,7 +66,6 @@ public:
       FastLED.setBrightness(result);
 
       USER_PRINTF("Set Brightness to %d -> b:%d r:%d\n", var["value"].as<int>(), bri, result);
-      ui->valChangedForInstancesTemp = true;
     });
     currentVar["log"] = true; //logarithmic
     currentVar["stage"] = true; //these values override model.json???
@@ -91,75 +88,72 @@ public:
       buffer[3] = max(ledsV.nrOfLedsP * SysModWeb::ws->count()/200, 16U); //interval in ms * 10, not too fast
     });
 
+    JsonObject tableVar = ui->initTable(parentVar, "fxTbl", nullptr, false, [this](JsonObject var) { //uiFun
+      web->addResponse(var["id"], "label", "Effects");
+      web->addResponse(var["id"], "comment", "List of effects (WIP)");
+      JsonArray rows = web->addResponseA(var["id"], "data");
+      // for (SysModule *module:modules) {
+
+      //add value for each child
+      JsonArray row = rows.createNestedArray();
+      for (JsonObject childVar : var["n"].as<JsonArray>()) {
+        print->printJson("fxTbl childs", childVar);
+        row.add(childVar["value"]);
+        //recursive
+        // for (JsonObject childVar : childVar["n"].as<JsonArray>()) {
+        //   print->printJson("fxTbl child childs", childVar);
+        //   row.add(childVar["value"]);
+        // }
+      }
+
+    });
+
     currentVar = ui->initSelect(parentVar, "fx", 0, false, [this](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "Effect");
       web->addResponse(var["id"], "comment", "Effect to show");
-      JsonArray select = web->addResponseA(var["id"], "select");
+      JsonArray select = web->addResponseA(var["id"], "data");
       for (Effect *effect:effects.effects) {
         select.add(effect->name());
       }
-    }, [this](JsonObject var) { //chFun
-      uint8_t fx = var["value"];
-      USER_PRINTF("%s Change %s to %d\n", "initSelect chFun", var["id"].as<const char *>(), fx);
-
-      doMap = effects.setEffect("fx", fx);
-      ui->valChangedForInstancesTemp = true;
+    }, [this](JsonObject var, uint8_t rowNr) { //chFun
+      doMap = effects.setEffect(var, rowNr);
     });
     currentVar["stage"] = true;
 
-    currentVar = ui->initSelect(parentVar, "pal", 4, false, [](JsonObject var) { //uiFun.
-      web->addResponse(var["id"], "label", "Palette");
-      JsonArray select = web->addResponseA(var["id"], "select");
-      select.add("CloudColors");
-      select.add("LavaColors");
-      select.add("OceanColors");
-      select.add("ForestColors");
-      select.add("RainbowColors");
-      select.add("RainbowStripeColors");
-      select.add("PartyColors");
-      select.add("HeatColors");
-    }, [](JsonObject var) { //chFun
-      USER_PRINTF("%s Change %s to %d\n", "initSelect chFun", var["id"].as<const char *>(), var["value"].as<int>());
-      switch (var["value"].as<uint8_t>()) {
-        case 0: palette = CloudColors_p; break;
-        case 1: palette = LavaColors_p; break;
-        case 2: palette = OceanColors_p; break;
-        case 3: palette = ForestColors_p; break;
-        case 4: palette = RainbowColors_p; break;
-        case 5: palette = RainbowStripeColors_p; break;
-        case 6: palette = PartyColors_p; break;
-        case 7: palette = HeatColors_p; break;
-        default: palette = PartyColors_p; break;
-      }
-      ui->valChangedForInstancesTemp = true;
-    });
-    currentVar["stage"] = true;
 
-    currentVar = ui->initSelect(parentVar, "pro", 2, false, [](JsonObject var) { //uiFun.
+    currentVar = ui->initSelect(tableVar, "pro", 2, false, [](JsonObject var) { //uiFun.
       web->addResponse(var["id"], "label", "Projection");
       web->addResponse(var["id"], "comment", "How to project fx to fixture");
-      JsonArray select = web->addResponseA(var["id"], "select");
+      JsonArray select = web->addResponseA(var["id"], "data");
       select.add("None"); // 0
       select.add("Random"); // 1
       select.add("Distance from point"); //2
-      select.add("Distance from centre"); //3
+      select.add("Distance from center"); //3
       select.add("Mirror"); //4
       select.add("Reverse"); //5
       select.add("Multiply"); //6
       select.add("Kaleidoscope"); //7
       select.add("Fun"); //8
-    }, [this](JsonObject var) { //chFun
-      USER_PRINTF("%s Change %s to %d\n", "initSelect chFun", var["id"].as<const char *>(), var["value"].as<int>());
+    }, [this](JsonObject var, uint8_t rowNr) { //chFun
 
-      ledsV.projectionNr = var["value"];
+      ledsV.projectionNr = var["value"][rowNr];
       doMap = true;
-      ui->valChangedForInstancesTemp = true;
+
     });
     currentVar["stage"] = true;
 
+    ui->initNumber(tableVar, "pointX", 0, 0, 127, false, [](JsonObject var) { //uiFun
+      web->addResponse(var["id"], "comment", "Depends on how much leds fastled has configured");
+    });
+    ui->initNumber(tableVar, "pointY", 0, 0, 127);
+    ui->initNumber(tableVar, "pointZ", 0, 0, 127);
+    // ui->initNumber(tableVar, "endX", 0, 0, 127);
+    // ui->initNumber(tableVar, "endY", 0, 0, 127);
+    // ui->initNumber(tableVar, "endZ", 0, 0, 127);
+
     ui->initSelect(parentVar, "fixture", 0, false, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "comment", "Fixture to display effect on");
-      JsonArray select = web->addResponseA(var["id"], "select");
+      JsonArray select = web->addResponseA(var["id"], "data");
       files->dirToJson(select, true, "D"); //only files containing D (1D,2D,3D), alphabetically, only looking for D not very destinctive though
 
       // ui needs to load the file also initially
@@ -167,8 +161,7 @@ public:
       if (files->seqNrToName(fileName, var["value"])) {
         web->addResponse("pview", "file", fileName);
       }
-    }, [this](JsonObject var) { //chFun
-      USER_PRINTF("%s Change %s to %d\n", "initSelect chFun", var["id"].as<const char *>(), var["value"].as<int>());
+    }, [this](JsonObject var, uint8_t) { //chFun
 
       ledsV.fixtureNr = var["value"];
       doMap = true;
@@ -201,9 +194,8 @@ public:
 
     ui->initNumber(parentVar, "fps", fps, 1, 999, false, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "comment", "Frames per second");
-    }, [this](JsonObject var) { //chFun
+    }, [this](JsonObject var, uint8_t) { //chFun
       fps = var["value"];
-      USER_PRINTF("fps changed %d\n", fps);
     });
 
     ui->initText(parentVar, "realFps", nullptr, 10, true, [](JsonObject var) { //uiFun
@@ -219,14 +211,16 @@ public:
           // e131mod->patchChannel(3, "pro", Projections::count);
           // e131mod->patchChannel(4, "fixture", 5); //assuming 5!!!
 
-          ui->valChangedForInstancesTemp = true;
-          
+          // ui->stageVarChanged = true;
+          ui->processUiFun("e131Tbl"); //rebuild the table
       // }
       // else
       //   USER_PRINTF("Leds e131 not enabled\n");
     #endif
 
     effects.setup();
+
+    FastLED.setMaxPowerInVoltsAndMilliamps(5,2000); // 5v, 2000mA
 
     USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
   }
@@ -240,7 +234,10 @@ public:
 
       newFrame = true;
 
-      effects.loop(mdl->getValue("fx"));
+      //for each programmed effect
+      //  run the next frame of the effect
+
+      effects.loop(ledsV.fx);
 
       FastLED.show();  
 
@@ -248,6 +245,26 @@ public:
     }
     else {
       newFrame = false;
+    }
+
+    JsonObject var = mdl->findVar("System");
+    if (!var["canvasData"].isNull()) {
+      const char * canvasData = var["canvasData"]; //0 - 494 - 140,150,0
+      USER_PRINTF("AppModLeds loop canvasData %s\n", canvasData);
+
+      char * token = strtok((char *)canvasData, ",");
+      if (token != NULL) ledsV.pointX = atoi(token) / 10; else ledsV.pointX = 0; //should never happen
+      token = strtok(NULL, ",");
+      if (token != NULL) ledsV.pointY = atoi(token) / 10; else ledsV.pointY = 0;
+      token = strtok(NULL, ",");
+      if (token != NULL) ledsV.pointZ = atoi(token) / 10; else ledsV.pointZ = 0;
+
+      mdl->setValueI("pointX", ledsV.pointX, 0);
+      mdl->setValueI("pointY", ledsV.pointY, 0);
+      mdl->setValueI("pointZ", ledsV.pointZ, 0);
+
+      var.remove("canvasData");
+      doMap = true; //recalc projection
     }
 
     //update projection

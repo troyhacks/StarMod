@@ -13,12 +13,17 @@
 
 #include "ArduinoJson.h"
 
+#define uint8Max 255U
+#define uint16Max 65535U
+
 class SysModule {
 
 public:
   const char * name;
   bool success;
   bool isEnabled;
+  unsigned long oneSecondMillis = millis() - random(1000); //random so not all 1s are fired at once
+  unsigned long tenSecondMillis = millis() - random(1000); //random within a second
 
   JsonObject parentVar;
 
@@ -33,6 +38,8 @@ public:
   virtual void loop() {}
   virtual void loop1s() {}
   virtual void loop10s() {}
+
+  virtual void reboot() {}
 
   virtual void connectedChanged() {onOffChanged();}
   virtual void enabledChanged() {onOffChanged();}

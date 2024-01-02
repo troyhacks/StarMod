@@ -24,14 +24,16 @@ public:
 
   void loop();
 
+  void reboot();
+
   void add(SysModule* module);
 
   void connectedChanged();
 
 private:
   std::vector<SysModule *> modules;
-  unsigned long oneSecondMillis = 0;
-  unsigned long tenSecondMillis = millis() - 4500;
+  // unsigned long oneSecondMillis = 0;
+  // unsigned long tenSecondMillis = millis() - 4500;
 };
 
 static SysModules *mdls;

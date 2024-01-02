@@ -32,31 +32,27 @@ public:
 
     parentVar = ui->initModule(parentVar, name);
 
-    ui->initNumber(parentVar, "dmxUni", universe, 0, 7, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Universe");
-    }, [this](JsonObject var) { //chFun
+    ui->initNumber(parentVar, "dun", universe, 0, 7, false, [](JsonObject var) { //uiFun
+      web->addResponse(var["id"], "label", "DMX Universe");
+    }, [this](JsonObject var, uint8_t) { //chFun
       universe = var["value"];
-      ui->valChangedForInstancesTemp = true;
     });
 
-    ui->initNumber(parentVar, "dmxChannel", 1, 0, 511, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Channel");
+    JsonObject currentVar = ui->initNumber(parentVar, "dch", 1, 1, 512, false, [](JsonObject var) { //uiFun
+      web->addResponse(var["id"], "label", "DMX Channel");
       web->addResponse(var["id"], "comment", "First channel");
-    }, [](JsonObject var) { //chFun
-    
-      ui->valChangedForInstancesTemp = true;
-
+    }, [](JsonObject var, uint8_t) { //chFun
       ui->processUiFun("e131Tbl"); //rebuild table
-
     });
+    currentVar["stage"] = true;
 
     JsonObject tableVar = ui->initTable(parentVar, "e131Tbl", nullptr, false, [this](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "Vars to watch");
       web->addResponse(var["id"], "comment", "List of instances");
-      JsonArray rows = web->addResponseA(var["id"], "table");
+      JsonArray rows = web->addResponseA(var["id"], "data");
       for (auto varToWatch: varsToWatch) {
         JsonArray row = rows.createNestedArray();
-        row.add(varToWatch.channel + mdl->getValue("dmxChannel").as<uint8_t>());
+        row.add(varToWatch.channel + mdl->getValue("dch").as<uint8_t>());
         row.add((char *)varToWatch.id);
         row.add(varToWatch.max);
         row.add(varToWatch.savedValue);
@@ -68,10 +64,10 @@ public:
     ui->initText(tableVar, "e131Name", nullptr, 32, true, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "Name");
     });
-    ui->initNumber(tableVar, "e131Max", -1, 0, (uint16_t)-1, true, [](JsonObject var) { //uiFun
+    ui->initNumber(tableVar, "e131Max", -1, 0, uint16Max, true, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "Max");
     });
-    ui->initNumber(tableVar, "e131Value", -1, 0, (uint8_t)-1, true, [](JsonObject var) { //uiFun
+    ui->initNumber(tableVar, "e131Value", -1, 0, 255, true, [](JsonObject var) { //uiFun
       web->addResponse(var["id"], "label", "Value");
     });
 
