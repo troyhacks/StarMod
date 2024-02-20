@@ -1,23 +1,33 @@
 /*
    @title     StarMod
    @file      SysModFiles.h
-   @date      20231016
+   @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2023 Github StarMod Commit Authors
+   @Copyright (c) 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
- */
+   @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
+*/
 
 #pragma once
 #include "SysModule.h"
 #include "LittleFS.h"
 
+struct FileDetails {
+  char name[32];
+  size_t size;
+};
+
 class SysModFiles: public SysModule {
 
 public:
+
+  std::vector<FileDetails> fileList;
+
   SysModFiles();
   void setup();
   void loop();
+  void loop10s();
 
   bool remove(const char * path);
 
@@ -50,7 +60,7 @@ public:
   bool readFile(const char * path);
 
 private:
-  static bool filesChanged;// = false;
+  static bool filesChanged;
 
 };
 

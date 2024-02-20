@@ -1,12 +1,14 @@
 /*
    @title     StarMod
    @file      UserModDDP.h
-   @date      20231016
+   @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2023 Github StarMod Commit Authors
+   @Copyright (c) 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+   @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
+
 #define DDP_DEFAULT_PORT 4048
 #define DDP_HEADER_LEN 10
 #define DDP_SYNCPACKET_LEN 10
@@ -36,47 +38,48 @@ public:
   IPAddress targetIp; //tbd: targetip also configurable from fixtures, and ddp instead of pin output
 
   UserModDDP() :SysModule("DDP") {
-    USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
-
     isEnabled = false; //default off
-
-    USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
   };
 
   //setup filesystem
   void setup() {
     SysModule::setup();
-    USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
-    parentVar = ui->initModule(parentVar, name);
+    parentVar = ui->initUserMod(parentVar, name);
+    if (parentVar["o"] > -1000) parentVar["o"] = -3000; //set default order. Don't use auto generated order as order can be changed in the ui (WIP)
 
-    ui->initSelect(parentVar, "ddpInst", -1, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Instance");
-      web->addResponse(var["id"], "comment", "Instance to send data");
-      JsonArray select = web->addResponseA(var["id"], "data");
-      JsonArray instanceObject = select.createNestedArray();
-      instanceObject.add(0);
-      instanceObject.add("no sync");
-      for (auto node=instances->nodes.begin(); node!=instances->nodes.end(); ++node) {
-        if (node->ip != WiFi.localIP()) {
-          char option[32] = { 0 };
-          strncpy(option, node->ip.toString().c_str(), sizeof(option)-1);
-          strncat(option, " ", sizeof(option)-1);
-          strncat(option, node->name, sizeof(option)-1);
-          instanceObject = select.createNestedArray();
-          instanceObject.add(node->ip[3]);
-          instanceObject.add(option);
+    ui->initSelect(parentVar, "ddpInst", UINT16_MAX, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    
+      case f_UIFun: {
+        ui->setLabel(var, "Instance");
+        ui->setComment(var, "Instance to send data");
+        JsonArray options = ui->setOptions(var);
+        JsonArray instanceObject = options.add<JsonArray>();
+        instanceObject.add(0);
+        instanceObject.add("no sync");
+        for (auto node=instances->instances.begin(); node!=instances->instances.end(); ++node) {
+          if (node->ip != WiFi.localIP()) {
+            char option[32] = { 0 };
+            strncpy(option, node->ip.toString().c_str(), sizeof(option)-1);
+            strncat(option, " ", sizeof(option)-1);
+            strncat(option, node->name, sizeof(option)-1);
+            instanceObject = options.add<JsonArray>();
+            instanceObject.add(node->ip[3]);
+            instanceObject.add(option);
+          }
         }
+        return true;
       }
-    }, [this](JsonObject var, uint8_t) { //chFun
-      size_t ddpInst = var["value"];
-      if (ddpInst >=0 && ddpInst < instances->nodes.size()) {
-        targetIp = instances->nodes[ddpInst].ip;
-        USER_PRINTF("Start DDP to %s\n", targetIp.toString().c_str());
+      case f_ChangeFun: {
+        size_t ddpInst = var["value"];
+        if (ddpInst >=0 && ddpInst < instances->instances.size()) {
+          targetIp = instances->instances[ddpInst].ip;
+          USER_PRINTF("Start DDP to %s\n", targetIp.toString().c_str());
+        }
+        return true;
       }
-    }); //ddpInst
-
-    USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
+      default: return false;
+    }}); //ddpInst
   }
 
   void loop() {
@@ -91,7 +94,7 @@ public:
     // calculate the number of UDP packets we need to send
     bool isRGBW = false;
 
-    const size_t channelCount = ledsV.nrOfLedsP * (isRGBW? 4:3); // 1 channel for every R,G,B,(W?) value
+    const size_t channelCount = lds->fixture.nrOfLeds * (isRGBW? 4:3); // 1 channel for every R,G,B,(W?) value
     const size_t packetCount = ((channelCount-1) / DDP_CHANNELS_PER_PACKET) +1;
 
     uint32_t channel = 0; 
@@ -139,8 +142,8 @@ public:
       /*8*/ddpUdp.write(0xFF & (packetSize >> 8));
       /*9*/ddpUdp.write(0xFF & (packetSize     ));
 
-      for (size_t i = 0; i < ledsV.nrOfLedsP; i++) {
-        CRGB pixel = ledsP[i];
+      for (size_t i = 0; i < lds->fixture.nrOfLeds; i++) {
+        CRGB pixel = lds->fixture.ledsP[i];
         ddpUdp.write(scale8(pixel.r, bri)); // R
         ddpUdp.write(scale8(pixel.g, bri)); // G
         ddpUdp.write(scale8(pixel.b, bri)); // B

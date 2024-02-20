@@ -1,23 +1,32 @@
 /*
    @title     StarMod
    @file      AppModLeds.h
-   @date      20231016
+   @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2023 Github StarMod Commit Authors
+   @Copyright (c) 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
- */
+   @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
+*/
 
 #include "SysModule.h"
 
-#include "AppLedsV.h"
-#include "AppEffects.h"
-#ifdef USERMOD_E131
-  #include "../User/UserModE131.h"
-#endif
-
-#include <vector>
+// FastLED optional flags to configure drivers, see https://github.com/FastLED/FastLED/blob/master/src/platforms/esp/32
+// RMT driver (default)
+// #define FASTLED_ESP32_FLASH_LOCK 1    // temporarily disabled FLASH file access while driving LEDs (may prevent random flicker)
+// #define FASTLED_RMT_BUILTIN_DRIVER 1  // in case your app needs to use RMT units, too (slower)
+// I2S parallel driver
+// #define FASTLED_ESP32_I2S true        // to use I2S parallel driver (instead of RMT)
+// #define I2S_DEVICE 1                  // I2S driver: allows to still use I2S#0 for audio (only on esp32 and esp32-s3)
+// #define FASTLED_I2S_MAX_CONTROLLERS 8 // 8 LED pins should be enough (default = 24)
 #include "FastLED.h"
+
+#include "AppFixture.h"
+#include "AppEffects.h"
+
+// #ifdef STARMOD_USERMOD_E131
+//   #include "../User/UserModE131.h"
+// #endif
 
 // #define FASTLED_RGBW
 
@@ -38,181 +47,211 @@ public:
 
   uint16_t fps = 60;
   unsigned long lastMappingMillis = 0;
-  bool doMap = false;
   Effects effects;
 
-  AppModLeds() :SysModule("Leds") {};
+  Fixture fixture = Fixture();
+
+  AppModLeds() :SysModule("Leds") {
+    fixture.ledsList.push_back(Leds(fixture.ledsList.size(), fixture));
+    fixture.ledsList.push_back(Leds(fixture.ledsList.size(), fixture));
+    USER_PRINTF("Leds created\n");
+  };
 
   void setup() {
     SysModule::setup();
-    USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
-    parentVar = ui->initModule(parentVar, name);
+    parentVar = ui->initAppMod(parentVar, name);
+    if (parentVar["o"] > -1000) parentVar["o"] = -1100; //set default order. Don't use auto generated order as order can be changed in the ui (WIP)
+
     JsonObject currentVar;
 
-    currentVar = ui->initCheckBox(parentVar, "on", true, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "On/Off");
-    });
+    JsonObject tableVar = ui->initTable(parentVar, "fxTbl", nullptr, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_UIFun:
+        ui->setLabel(var, "Effects");
+        ui->setComment(var, "List of effects");
+        return true;
+      case f_AddRow: {
+        rowNr = fixture.ledsList.size();
+        USER_PRINTF("chFun addRow %s[%d]\n", mdl->varID(var), rowNr);
+
+        web->getResponseObject()["addRow"]["rowNr"] = rowNr;
+
+        if (rowNr >= fixture.ledsList.size())
+          fixture.ledsList.push_back(Leds(fixture.ledsList.size(), fixture));
+        return true;
+      }
+      case f_DelRow: {
+        USER_PRINTF("chFun delrow %s[%d]\n", mdl->varID(var), rowNr);
+        //tbd: fade to black
+        if (rowNr <fixture.ledsList.size()) {
+          fixture.ledsList.erase(fixture.ledsList.begin() + rowNr); //remove from leds
+        }
+        return true;
+      }
+      default: return false;
+    }});
+
+    currentVar = ui->initSelect(tableVar, "fx", 0, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_ValueFun:
+        for (uint8_t rowNr = 0; rowNr < fixture.ledsList.size(); rowNr++)
+          mdl->setValue(var, fixture.ledsList[rowNr].fx, rowNr);
+        return true;
+      case f_UIFun: {
+        ui->setLabel(var, "Effect");
+        ui->setComment(var, "Effect to show");
+        JsonArray options = ui->setOptions(var);
+        for (Effect *effect:effects.effects) {
+          options.add(effect->name());
+        }
+        return true;
+      }
+      case f_ChangeFun:
+        if (rowNr < fixture.ledsList.size()) {
+          effects.setEffect(fixture.ledsList[rowNr], var, rowNr);
+
+          web->addResponse("details", "var", var);
+          web->addResponse("details", "rowNr", rowNr);
+        }
+        return true;
+      default: return false;
+    }});
     currentVar["stage"] = true;
 
-    //logarithmic slider (10)
-    currentVar = ui->initSlider(parentVar, "bri", 10, 0, 255, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Brightness");
-    }, [](JsonObject var, uint8_t) { //chFun
-      uint8_t bri = var["value"];
-
-      uint8_t result = linearToLogarithm(var, bri);
-
-      FastLED.setBrightness(result);
-
-      USER_PRINTF("Set Brightness to %d -> b:%d r:%d\n", var["value"].as<int>(), bri, result);
-    });
-    currentVar["log"] = true; //logarithmic
-    currentVar["stage"] = true; //these values override model.json???
-
-    ui->initCanvas(parentVar, "pview", -1, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Preview");
-      web->addResponse(var["id"], "comment", "Shows the fixture");
-      // web->addResponse(var["id"], "comment", "Click to enlarge");
-    }, nullptr, [](JsonObject var, uint8_t* buffer) { //loopFun
-      // send leds preview to clients
-      for (size_t i = 0; i < buffer[0] * 256 + buffer[1]; i++)
-      {
-        buffer[i*3+4] = ledsP[i].red;
-        buffer[i*3+4+1] = ledsP[i].green;
-        buffer[i*3+4+2] = ledsP[i].blue;
+    currentVar = ui->initSelect(tableVar, "pro", 2, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_ValueFun:
+        for (uint8_t rowNr = 0; rowNr < fixture.ledsList.size(); rowNr++)
+          mdl->setValue(var, fixture.ledsList[rowNr].projectionNr, rowNr);
+        return true;
+      case f_UIFun: {
+        ui->setLabel(var, "Projection");
+        ui->setComment(var, "How to project fx");
+        JsonArray options = ui->setOptions(var);
+        options.add("None"); // 0
+        options.add("Random"); // 1
+        options.add("Distance from point"); //2
+        options.add("Distance from center"); //3
+        options.add("Mirror"); //4
+        options.add("Reverse"); //5
+        options.add("Multiply"); //6
+        options.add("Kaleidoscope"); //7
+        options.add("Fun"); //8
+        return true;
       }
-      //new values
-      buffer[0] = ledsV.nrOfLedsP/256;
-      buffer[1] = ledsV.nrOfLedsP%256;
-      buffer[3] = max(ledsV.nrOfLedsP * SysModWeb::ws->count()/200, 16U); //interval in ms * 10, not too fast
-    });
+      case f_ChangeFun:
+        if (rowNr < fixture.ledsList.size()) {
+          fixture.ledsList[rowNr].projectionNr = mdl->getValue(var, rowNr);
+          USER_PRINTF("chFun pro[%d] <- %d (%d)\n", rowNr, fixture.ledsList[rowNr].projectionNr, fixture.ledsList.size());
 
-    JsonObject tableVar = ui->initTable(parentVar, "fxTbl", nullptr, false, [this](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Effects");
-      web->addResponse(var["id"], "comment", "List of effects (WIP)");
-      JsonArray rows = web->addResponseA(var["id"], "data");
-      // for (SysModule *module:modules) {
-
-      //add value for each child
-      JsonArray row = rows.createNestedArray();
-      for (JsonObject childVar : var["n"].as<JsonArray>()) {
-        print->printJson("fxTbl childs", childVar);
-        row.add(childVar["value"]);
-        //recursive
-        // for (JsonObject childVar : childVar["n"].as<JsonArray>()) {
-        //   print->printJson("fxTbl child childs", childVar);
-        //   row.add(childVar["value"]);
-        // }
-      }
-
-    });
-
-    currentVar = ui->initSelect(parentVar, "fx", 0, false, [this](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Effect");
-      web->addResponse(var["id"], "comment", "Effect to show");
-      JsonArray select = web->addResponseA(var["id"], "data");
-      for (Effect *effect:effects.effects) {
-        select.add(effect->name());
-      }
-    }, [this](JsonObject var, uint8_t rowNr) { //chFun
-      doMap = effects.setEffect(var, rowNr);
-    });
+          fixture.ledsList[rowNr].doMap = true;
+          fixture.doMap = true;
+        }
+        return true;
+      default: return false;
+    }});
     currentVar["stage"] = true;
 
+    ui->initCoord3D(tableVar, "fxStart", fixture.ledsList[0].startPos, 0, NUM_LEDS_Max, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_ValueFun:
+        USER_PRINTF("fxStart[%d] valueFun %d,%d,%d\n", rowNr, fixture.ledsList[rowNr].startPos.x, fixture.ledsList[rowNr].startPos.y, fixture.ledsList[rowNr].startPos.z);
+        for (uint8_t rowNr = 0; rowNr < fixture.ledsList.size(); rowNr++)
+          mdl->setValue(var, fixture.ledsList[rowNr].startPos, rowNr);
+        return true;
+      case f_UIFun:
+        ui->setLabel(var, "Start");
+        return true;
+      case f_ChangeFun:
+        if (rowNr < fixture.ledsList.size()) {
+          fixture.ledsList[rowNr].startPos = mdl->getValue(var, rowNr).as<Coord3D>();
 
-    currentVar = ui->initSelect(tableVar, "pro", 2, false, [](JsonObject var) { //uiFun.
-      web->addResponse(var["id"], "label", "Projection");
-      web->addResponse(var["id"], "comment", "How to project fx to fixture");
-      JsonArray select = web->addResponseA(var["id"], "data");
-      select.add("None"); // 0
-      select.add("Random"); // 1
-      select.add("Distance from point"); //2
-      select.add("Distance from center"); //3
-      select.add("Mirror"); //4
-      select.add("Reverse"); //5
-      select.add("Multiply"); //6
-      select.add("Kaleidoscope"); //7
-      select.add("Fun"); //8
-    }, [this](JsonObject var, uint8_t rowNr) { //chFun
+          USER_PRINTF("fxStart[%d] chFun %d,%d,%d\n", rowNr, fixture.ledsList[rowNr].startPos.x, fixture.ledsList[rowNr].startPos.y, fixture.ledsList[rowNr].startPos.z);
 
-      ledsV.projectionNr = var["value"][rowNr];
-      doMap = true;
+          fixture.ledsList[rowNr].fadeToBlackBy();
+          fixture.ledsList[rowNr].doMap = true;
+          fixture.doMap = true;
+        }
+        else {
+          USER_PRINTF("fxStart[%d] chfun rownr not in range > %d\n", rowNr, fixture.ledsList.size());
+        }
+        return true;
+      default: return false;
+    }});
 
-    });
-    currentVar["stage"] = true;
+    ui->initCoord3D(tableVar, "fxEnd", fixture.ledsList[0].endPos, 0, NUM_LEDS_Max, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_ValueFun:
+        for (uint8_t rowNr = 0; rowNr < fixture.ledsList.size(); rowNr++)
+          mdl->setValue(var, fixture.ledsList[rowNr].endPos, rowNr);
+        USER_PRINTF("fxEnd[%d] valueFun %d,%d,%d\n", rowNr, fixture.ledsList[rowNr].endPos.x, fixture.ledsList[rowNr].endPos.y, fixture.ledsList[rowNr].endPos.z);
+        return true;
+      case f_UIFun:
+        ui->setLabel(var, "End");
+        return true;
+      case f_ChangeFun:
+        if (rowNr < fixture.ledsList.size()) {
+          fixture.ledsList[rowNr].endPos = mdl->getValue(var, rowNr).as<Coord3D>();
 
-    ui->initNumber(tableVar, "pointX", 0, 0, 127, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "comment", "Depends on how much leds fastled has configured");
-    });
-    ui->initNumber(tableVar, "pointY", 0, 0, 127);
-    ui->initNumber(tableVar, "pointZ", 0, 0, 127);
-    // ui->initNumber(tableVar, "endX", 0, 0, 127);
-    // ui->initNumber(tableVar, "endY", 0, 0, 127);
-    // ui->initNumber(tableVar, "endZ", 0, 0, 127);
+          USER_PRINTF("fxEnd[%d] chFun %d,%d,%d\n", rowNr, fixture.ledsList[rowNr].endPos.x, fixture.ledsList[rowNr].endPos.y, fixture.ledsList[rowNr].endPos.z);
 
-    ui->initSelect(parentVar, "fixture", 0, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "comment", "Fixture to display effect on");
-      JsonArray select = web->addResponseA(var["id"], "data");
-      files->dirToJson(select, true, "D"); //only files containing D (1D,2D,3D), alphabetically, only looking for D not very destinctive though
+          fixture.ledsList[rowNr].fadeToBlackBy();
+          fixture.ledsList[rowNr].doMap = true;
+          fixture.doMap = true;
+        }
+        else {
+          USER_PRINTF("fxEnd[%d] chfun rownr not in range > %d\n", rowNr, fixture.ledsList.size());
+        }
+        return true;
+      default: return false;
+    }});
 
-      // ui needs to load the file also initially
-      char fileName[32] = "";
-      if (files->seqNrToName(fileName, var["value"])) {
-        web->addResponse("pview", "file", fileName);
+    ui->initText(tableVar, "fxSize", nullptr, 32, true, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_ValueFun:
+        for (std::vector<Leds>::iterator leds=fixture.ledsList.begin(); leds!=fixture.ledsList.end(); ++leds) {
+          char message[32];
+          print->fFormat(message, sizeof(message)-1, "%d x %d x %d = %d", leds->size.x, leds->size.y, leds->size.z, leds->nrOfLeds);
+          USER_PRINTF("fxSize[%d]([%d 0f %d]) = %s\n", leds - fixture.ledsList.begin(), fixture.ledsList[leds - fixture.ledsList.begin()].rowNr, fixture.ledsList.size(), message);
+          mdl->setValue(var, JsonString(message, JsonString::Copied), leds - fixture.ledsList.begin()); //rowNr
+        }
+        return true;
+      case f_UIFun:
+        ui->setLabel(var, "Size");
+        return true;
+      default: return false;
+    }});
+
+    ui->initSelect(parentVar, "fxLayout", 0, false, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_UIFun: {
+        ui->setLabel(var, "Layout");
+        ui->setComment(var, "WIP");
+        JsonArray options = ui->setOptions(var);
+        options.add("□"); //0
+        options.add("="); //1
+        options.add("||"); //2
+        options.add("+"); //3
+        return true;
       }
-    }, [this](JsonObject var, uint8_t) { //chFun
+      default: return false;
+    }}); //fixtureGen
 
-      ledsV.fixtureNr = var["value"];
-      doMap = true;
+    ui->initSlider(parentVar, "Blending", fixture.globalBlend, 0, 255, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_ChangeFun:
+        fixture.globalBlend = var["value"];
+        return true;
+      default: return false;
+    }});
 
-      char fileName[32] = "";
-      if (files->seqNrToName(fileName, ledsV.fixtureNr)) {
-        //send to pview a message to get file filename
-        JsonDocument *responseDoc = web->getResponseDoc();
-        responseDoc->clear(); //needed for deserializeJson?
-        JsonVariant responseVariant = responseDoc->as<JsonVariant>();
-
-        web->addResponse("pview", "file", fileName);
-        web->sendDataWs(responseVariant);
-        print->printJson("fixture chFun send ws done", responseVariant); //during server startup this is not send to a client, so client refresh should also trigger this
-      }
-    }); //fixture
-
-    ui->initText(parentVar, "dimensions", nullptr, 32, true, [](JsonObject var) { //uiFun
-      char details[32] = "";
-      print->fFormat(details, sizeof(details)-1, "P:%dx%dx%d V:%dx%dx%d", ledsV.widthP, ledsV.heightP, ledsV.depthP, ledsV.widthV, ledsV.heightV, ledsV.depthV);
-      web->addResponse(var["id"], "value", details);
-    });
-
-    ui->initText(parentVar, "nrOfLeds", nullptr, 32, true, [](JsonObject var) { //uiFun
-      char details[32] = "";
-      print->fFormat(details, sizeof(details)-1, "P:%d V:%d", ledsV.nrOfLedsP, ledsV.nrOfLedsV);
-      web->addResponse(var["id"], "value", details);
-      web->addResponseV(var["id"], "comment", "Max %d", NUM_LEDS_Preview);
-    });
-
-    ui->initNumber(parentVar, "fps", fps, 1, 999, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "comment", "Frames per second");
-    }, [this](JsonObject var, uint8_t) { //chFun
-      fps = var["value"];
-    });
-
-    ui->initText(parentVar, "realFps", nullptr, 10, true, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "comment", "Depends on how much leds fastled has configured");
-    });
-
-    #ifdef USERMOD_E131
+    #ifdef STARMOD_USERMOD_E131
       // if (e131mod->isEnabled) {
           e131mod->patchChannel(0, "bri", 255); //should be 256??
-          e131mod->patchChannel(1, "fx", effects.size());
+          e131mod->patchChannel(1, "fx", effects.effects.size());
           e131mod->patchChannel(2, "pal", 8); //tbd: calculate nr of palettes (from select)
           // //add these temporary to test remote changing of this values do not crash the system
           // e131mod->patchChannel(3, "pro", Projections::count);
           // e131mod->patchChannel(4, "fixture", 5); //assuming 5!!!
 
           // ui->stageVarChanged = true;
-          ui->processUiFun("e131Tbl"); //rebuild the table
+          // //rebuild the table
+          for (JsonObject childVar: mdl->varN("e131Tbl"))
+            ui->callVarFun(childVar, UINT8_MAX, f_ValueFun);
+
       // }
       // else
       //   USER_PRINTF("Leds e131 not enabled\n");
@@ -221,8 +260,6 @@ public:
     effects.setup();
 
     FastLED.setMaxPowerInVoltsAndMilliamps(5,2000); // 5v, 2000mA
-
-    USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
   }
 
   void loop() {
@@ -236,8 +273,11 @@ public:
 
       //for each programmed effect
       //  run the next frame of the effect
-
-      effects.loop(ledsV.fx);
+      // vector iteration on classes is faster!!! (22 vs 30 fps !!!!)
+      for (std::vector<Leds>::iterator leds=fixture.ledsList.begin(); leds!=fixture.ledsList.end(); ++leds) {
+        // USER_PRINTF(" %d %d,%d,%d - %d,%d,%d (%d,%d,%d)", leds->fx, leds->startPos.x, leds->startPos.y, leds->startPos.z, leds->endPos.x, leds->endPos.y, leds->endPos.z, leds->size.x, leds->size.y, leds->size.z );
+        effects.loop(*leds);
+      }
 
       FastLED.show();  
 
@@ -252,26 +292,33 @@ public:
       const char * canvasData = var["canvasData"]; //0 - 494 - 140,150,0
       USER_PRINTF("AppModLeds loop canvasData %s\n", canvasData);
 
-      char * token = strtok((char *)canvasData, ",");
-      if (token != NULL) ledsV.pointX = atoi(token) / 10; else ledsV.pointX = 0; //should never happen
-      token = strtok(NULL, ",");
-      if (token != NULL) ledsV.pointY = atoi(token) / 10; else ledsV.pointY = 0;
-      token = strtok(NULL, ",");
-      if (token != NULL) ledsV.pointZ = atoi(token) / 10; else ledsV.pointZ = 0;
+      //currently only leds[0] supported
 
-      mdl->setValueI("pointX", ledsV.pointX, 0);
-      mdl->setValueI("pointY", ledsV.pointY, 0);
-      mdl->setValueI("pointZ", ledsV.pointZ, 0);
+      fixture.ledsList[0].fadeToBlackBy();
 
-      var.remove("canvasData");
-      doMap = true; //recalc projection
+      char * token = strtok((char *)canvasData, ":");
+      bool isStart = strcmp(token, "start") == 0;
+
+      Coord3D *startOrEndPos = isStart? &fixture.ledsList[0].startPos: &fixture.ledsList[0].endPos;
+
+      token = strtok(NULL, ",");
+      if (token != NULL) startOrEndPos->x = atoi(token) / 10; else startOrEndPos->x = 0; //should never happen
+      token = strtok(NULL, ",");
+      if (token != NULL) startOrEndPos->y = atoi(token) / 10; else startOrEndPos->y = 0;
+      token = strtok(NULL, ",");
+      if (token != NULL) startOrEndPos->z = atoi(token) / 10; else startOrEndPos->z = 0;
+
+      mdl->setValue(isStart?"fxStart":"fxEnd", *startOrEndPos, 0); //assuming row 0 for the moment
+
+      var.remove("canvasData"); //convasdata has been processed
+      fixture.ledsList[0].doMap = true; //recalc projection
+      fixture.doMap = true;
     }
 
     //update projection
-    if (millis() - lastMappingMillis >= 1000 && doMap) { //not more then once per second (for E131)
+    if (millis() - lastMappingMillis >= 1000 && fixture.doMap) { //not more then once per second (for E131)
       lastMappingMillis = millis();
-      doMap = false;
-      ledsV.fixtureProjectAndMap();
+      fixture.projectAndMap();
 
       //https://github.com/FastLED/FastLED/wiki/Multiple-Controller-Examples
 
@@ -291,57 +338,201 @@ public:
 
             //commented pins: error: static assertion failed: Invalid pin specified
             switch (pinNr) {
-              case 0: FastLED.addLeds<NEOPIXEL, 0>(ledsP, startLed, nrOfLeds); break;
-              case 1: FastLED.addLeds<NEOPIXEL, 1>(ledsP, startLed, nrOfLeds); break;
-              case 2: FastLED.addLeds<NEOPIXEL, 2>(ledsP, startLed, nrOfLeds); break;
-              case 3: FastLED.addLeds<NEOPIXEL, 3>(ledsP, startLed, nrOfLeds); break;
-              case 4: FastLED.addLeds<NEOPIXEL, 4>(ledsP, startLed, nrOfLeds); break;
-              case 5: FastLED.addLeds<NEOPIXEL, 5>(ledsP, startLed, nrOfLeds); break;
-              // case 6: FastLED.addLeds<NEOPIXEL, 6>(ledsP, startLed, nrOfLeds); break;
-              // case 7: FastLED.addLeds<NEOPIXEL, 7>(ledsP, startLed, nrOfLeds); break;
-              // case 8: FastLED.addLeds<NEOPIXEL, 8>(ledsP, startLed, nrOfLeds); break;
-              // case 9: FastLED.addLeds<NEOPIXEL, 9>(ledsP, startLed, nrOfLeds); break;
-              // case 10: FastLED.addLeds<NEOPIXEL, 10>(ledsP, startLed, nrOfLeds); break;
-              case 11: FastLED.addLeds<NEOPIXEL, 11>(ledsP, startLed, nrOfLeds); break;
-              case 12: FastLED.addLeds<NEOPIXEL, 12>(ledsP, startLed, nrOfLeds); break;
-              case 13: FastLED.addLeds<NEOPIXEL, 13>(ledsP, startLed, nrOfLeds); break;
-              case 14: FastLED.addLeds<NEOPIXEL, 14>(ledsP, startLed, nrOfLeds); break;
-              case 15: FastLED.addLeds<NEOPIXEL, 15>(ledsP, startLed, nrOfLeds); break;
-              case 16: FastLED.addLeds<NEOPIXEL, 16>(ledsP, startLed, nrOfLeds); break;
-              case 17: FastLED.addLeds<NEOPIXEL, 17>(ledsP, startLed, nrOfLeds); break;
-              case 18: FastLED.addLeds<NEOPIXEL, 18>(ledsP, startLed, nrOfLeds); break;
-              case 19: FastLED.addLeds<NEOPIXEL, 19>(ledsP, startLed, nrOfLeds); break;
-              // case 20: FastLED.addLeds<NEOPIXEL, 20>(ledsP, startLed, nrOfLeds); break;
-              case 21: FastLED.addLeds<NEOPIXEL, 21>(ledsP, startLed, nrOfLeds); break;
-              case 22: FastLED.addLeds<NEOPIXEL, 22>(ledsP, startLed, nrOfLeds); break;
-              case 23: FastLED.addLeds<NEOPIXEL, 23>(ledsP, startLed, nrOfLeds); break;
-              // case 24: FastLED.addLeds<NEOPIXEL, 24>(ledsP, startLed, nrOfLeds); break;
-              case 25: FastLED.addLeds<NEOPIXEL, 25>(ledsP, startLed, nrOfLeds); break;
-              case 26: FastLED.addLeds<NEOPIXEL, 26>(ledsP, startLed, nrOfLeds); break;
-              case 27: FastLED.addLeds<NEOPIXEL, 27>(ledsP, startLed, nrOfLeds); break;
-              // case 28: FastLED.addLeds<NEOPIXEL, 28>(ledsP, startLed, nrOfLeds); break;
-              // case 29: FastLED.addLeds<NEOPIXEL, 29>(ledsP, startLed, nrOfLeds); break;
-              // case 30: FastLED.addLeds<NEOPIXEL, 30>(ledsP, startLed, nrOfLeds); break;
-              // case 31: FastLED.addLeds<NEOPIXEL, 31>(ledsP, startLed, nrOfLeds); break;
-              case 32: FastLED.addLeds<NEOPIXEL, 32>(ledsP, startLed, nrOfLeds); break;
-              case 33: FastLED.addLeds<NEOPIXEL, 33>(ledsP, startLed, nrOfLeds); break;
-              // case 34: FastLED.addLeds<NEOPIXEL, 34>(ledsP, startLed, nrOfLeds); break;
-              // case 35: FastLED.addLeds<NEOPIXEL, 35>(ledsP, startLed, nrOfLeds); break;
-              // case 36: FastLED.addLeds<NEOPIXEL, 36>(ledsP, startLed, nrOfLeds); break;
-              // case 37: FastLED.addLeds<NEOPIXEL, 37>(ledsP, startLed, nrOfLeds); break;
-              // case 38: FastLED.addLeds<NEOPIXEL, 38>(ledsP, startLed, nrOfLeds); break;
-              // case 39: FastLED.addLeds<NEOPIXEL, 39>(ledsP, startLed, nrOfLeds); break;
-              // case 40: FastLED.addLeds<NEOPIXEL, 40>(ledsP, startLed, nrOfLeds); break;
-              // case 41: FastLED.addLeds<NEOPIXEL, 41>(ledsP, startLed, nrOfLeds); break;
-              // case 42: FastLED.addLeds<NEOPIXEL, 42>(ledsP, startLed, nrOfLeds); break;
-              // case 43: FastLED.addLeds<NEOPIXEL, 43>(ledsP, startLed, nrOfLeds); break;
-              // case 44: FastLED.addLeds<NEOPIXEL, 44>(ledsP, startLed, nrOfLeds); break;
-              // case 45: FastLED.addLeds<NEOPIXEL, 45>(ledsP, startLed, nrOfLeds); break;
-              // case 46: FastLED.addLeds<NEOPIXEL, 46>(ledsP, startLed, nrOfLeds); break;
-              // case 47: FastLED.addLeds<NEOPIXEL, 47>(ledsP, startLed, nrOfLeds); break;
-              // case 48: FastLED.addLeds<NEOPIXEL, 48>(ledsP, startLed, nrOfLeds); break;
-              // case 49: FastLED.addLeds<NEOPIXEL, 49>(ledsP, startLed, nrOfLeds); break;
-              // case 50: FastLED.addLeds<NEOPIXEL, 50>(ledsP, startLed, nrOfLeds); break;
+              #if CONFIG_IDF_TARGET_ESP32
+                case 0: FastLED.addLeds<NEOPIXEL, 0>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 1: FastLED.addLeds<NEOPIXEL, 1>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 2: FastLED.addLeds<NEOPIXEL, 2>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 3: FastLED.addLeds<NEOPIXEL, 3>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 4: FastLED.addLeds<NEOPIXEL, 4>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 5: FastLED.addLeds<NEOPIXEL, 5>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 6: FastLED.addLeds<NEOPIXEL, 6>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 7: FastLED.addLeds<NEOPIXEL, 7>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 8: FastLED.addLeds<NEOPIXEL, 8>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 9: FastLED.addLeds<NEOPIXEL, 9>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 10: FastLED.addLeds<NEOPIXEL, 10>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 11: FastLED.addLeds<NEOPIXEL, 11>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 12: FastLED.addLeds<NEOPIXEL, 12>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 13: FastLED.addLeds<NEOPIXEL, 13>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 14: FastLED.addLeds<NEOPIXEL, 14>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 15: FastLED.addLeds<NEOPIXEL, 15>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+            #if !defined(BOARD_HAS_PSRAM) && !defined(ARDUINO_ESP32_PICO)
+                // 16+17 = reserved for PSRAM, or reserved for FLASH on pico-D4
+                case 16: FastLED.addLeds<NEOPIXEL, 16>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 17: FastLED.addLeds<NEOPIXEL, 17>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+            #endif
+                case 18: FastLED.addLeds<NEOPIXEL, 18>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 19: FastLED.addLeds<NEOPIXEL, 19>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 20: FastLED.addLeds<NEOPIXEL, 20>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 21: FastLED.addLeds<NEOPIXEL, 21>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 22: FastLED.addLeds<NEOPIXEL, 22>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 23: FastLED.addLeds<NEOPIXEL, 23>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 24: FastLED.addLeds<NEOPIXEL, 24>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 25: FastLED.addLeds<NEOPIXEL, 25>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 26: FastLED.addLeds<NEOPIXEL, 26>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 27: FastLED.addLeds<NEOPIXEL, 27>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 28: FastLED.addLeds<NEOPIXEL, 28>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 29: FastLED.addLeds<NEOPIXEL, 29>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 30: FastLED.addLeds<NEOPIXEL, 30>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 31: FastLED.addLeds<NEOPIXEL, 31>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 32: FastLED.addLeds<NEOPIXEL, 32>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 33: FastLED.addLeds<NEOPIXEL, 33>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // 34-39 input-only
+                // case 34: FastLED.addLeds<NEOPIXEL, 34>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 35: FastLED.addLeds<NEOPIXEL, 35>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 36: FastLED.addLeds<NEOPIXEL, 36>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 37: FastLED.addLeds<NEOPIXEL, 37>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 38: FastLED.addLeds<NEOPIXEL, 38>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 39: FastLED.addLeds<NEOPIXEL, 39>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+              #endif //CONFIG_IDF_TARGET_ESP32
+
+              #if CONFIG_IDF_TARGET_ESP32S2
+                case 0: FastLED.addLeds<NEOPIXEL, 0>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 1: FastLED.addLeds<NEOPIXEL, 1>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 2: FastLED.addLeds<NEOPIXEL, 2>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 3: FastLED.addLeds<NEOPIXEL, 3>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 4: FastLED.addLeds<NEOPIXEL, 4>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 5: FastLED.addLeds<NEOPIXEL, 5>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 6: FastLED.addLeds<NEOPIXEL, 6>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 7: FastLED.addLeds<NEOPIXEL, 7>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 8: FastLED.addLeds<NEOPIXEL, 8>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 9: FastLED.addLeds<NEOPIXEL, 9>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 10: FastLED.addLeds<NEOPIXEL, 10>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 11: FastLED.addLeds<NEOPIXEL, 11>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 12: FastLED.addLeds<NEOPIXEL, 12>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 13: FastLED.addLeds<NEOPIXEL, 13>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 14: FastLED.addLeds<NEOPIXEL, 14>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 15: FastLED.addLeds<NEOPIXEL, 15>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 16: FastLED.addLeds<NEOPIXEL, 16>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 17: FastLED.addLeds<NEOPIXEL, 17>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 18: FastLED.addLeds<NEOPIXEL, 18>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+            #if !ARDUINO_USB_CDC_ON_BOOT
+                // 19 + 20 = USB HWCDC. reserved for USB port when ARDUINO_USB_CDC_ON_BOOT=1
+                case 19: FastLED.addLeds<NEOPIXEL, 19>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 20: FastLED.addLeds<NEOPIXEL, 20>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+            #endif
+                case 21: FastLED.addLeds<NEOPIXEL, 21>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // 22 to 32: not connected, or reserved for SPI FLASH
+                // case 22: FastLED.addLeds<NEOPIXEL, 22>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 23: FastLED.addLeds<NEOPIXEL, 23>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 24: FastLED.addLeds<NEOPIXEL, 24>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 25: FastLED.addLeds<NEOPIXEL, 25>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+            #if !defined(BOARD_HAS_PSRAM)
+                // 26-32 = reserved for PSRAM
+                case 26: FastLED.addLeds<NEOPIXEL, 26>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 27: FastLED.addLeds<NEOPIXEL, 27>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 28: FastLED.addLeds<NEOPIXEL, 28>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 29: FastLED.addLeds<NEOPIXEL, 29>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 30: FastLED.addLeds<NEOPIXEL, 30>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 31: FastLED.addLeds<NEOPIXEL, 31>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 32: FastLED.addLeds<NEOPIXEL, 32>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+            #endif
+                case 33: FastLED.addLeds<NEOPIXEL, 33>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 34: FastLED.addLeds<NEOPIXEL, 34>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 35: FastLED.addLeds<NEOPIXEL, 35>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 36: FastLED.addLeds<NEOPIXEL, 36>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 37: FastLED.addLeds<NEOPIXEL, 37>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 38: FastLED.addLeds<NEOPIXEL, 38>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 39: FastLED.addLeds<NEOPIXEL, 39>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 40: FastLED.addLeds<NEOPIXEL, 40>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 41: FastLED.addLeds<NEOPIXEL, 41>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 42: FastLED.addLeds<NEOPIXEL, 42>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 43: FastLED.addLeds<NEOPIXEL, 43>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 44: FastLED.addLeds<NEOPIXEL, 44>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 45: FastLED.addLeds<NEOPIXEL, 45>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // 46 input-only
+                // case 46: FastLED.addLeds<NEOPIXEL, 46>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+              #endif //CONFIG_IDF_TARGET_ESP32S2
+
+              #if CONFIG_IDF_TARGET_ESP32C3
+                case 0: FastLED.addLeds<NEOPIXEL, 0>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 1: FastLED.addLeds<NEOPIXEL, 1>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 2: FastLED.addLeds<NEOPIXEL, 2>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 3: FastLED.addLeds<NEOPIXEL, 3>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 4: FastLED.addLeds<NEOPIXEL, 4>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 5: FastLED.addLeds<NEOPIXEL, 5>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 6: FastLED.addLeds<NEOPIXEL, 6>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 7: FastLED.addLeds<NEOPIXEL, 7>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 8: FastLED.addLeds<NEOPIXEL, 8>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 9: FastLED.addLeds<NEOPIXEL, 9>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 10: FastLED.addLeds<NEOPIXEL, 10>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // 11-17 reserved for SPI FLASH
+                //case 11: FastLED.addLeds<NEOPIXEL, 11>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                //case 12: FastLED.addLeds<NEOPIXEL, 12>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                //case 13: FastLED.addLeds<NEOPIXEL, 13>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                //case 14: FastLED.addLeds<NEOPIXEL, 14>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                //case 15: FastLED.addLeds<NEOPIXEL, 15>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                //case 16: FastLED.addLeds<NEOPIXEL, 16>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                //case 17: FastLED.addLeds<NEOPIXEL, 17>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+            #if !ARDUINO_USB_CDC_ON_BOOT
+                // 18 + 19 = USB HWCDC. reserved for USB port when ARDUINO_USB_CDC_ON_BOOT=1
+                case 18: FastLED.addLeds<NEOPIXEL, 18>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 19: FastLED.addLeds<NEOPIXEL, 19>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+            #endif
+                // 20+21 = Serial RX+TX --> don't use for LEDS when serial-to-USB is needed
+                case 20: FastLED.addLeds<NEOPIXEL, 20>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 21: FastLED.addLeds<NEOPIXEL, 21>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+              #endif //CONFIG_IDF_TARGET_ESP32S2
+
+              #if CONFIG_IDF_TARGET_ESP32S3
+                case 0: FastLED.addLeds<NEOPIXEL, 0>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 1: FastLED.addLeds<NEOPIXEL, 1>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 2: FastLED.addLeds<NEOPIXEL, 2>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 3: FastLED.addLeds<NEOPIXEL, 3>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 4: FastLED.addLeds<NEOPIXEL, 4>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 5: FastLED.addLeds<NEOPIXEL, 5>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 6: FastLED.addLeds<NEOPIXEL, 6>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 7: FastLED.addLeds<NEOPIXEL, 7>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 8: FastLED.addLeds<NEOPIXEL, 8>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 9: FastLED.addLeds<NEOPIXEL, 9>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 10: FastLED.addLeds<NEOPIXEL, 10>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 11: FastLED.addLeds<NEOPIXEL, 11>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 12: FastLED.addLeds<NEOPIXEL, 12>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 13: FastLED.addLeds<NEOPIXEL, 13>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 14: FastLED.addLeds<NEOPIXEL, 14>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 15: FastLED.addLeds<NEOPIXEL, 15>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 16: FastLED.addLeds<NEOPIXEL, 16>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 17: FastLED.addLeds<NEOPIXEL, 17>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 18: FastLED.addLeds<NEOPIXEL, 18>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+            #if !ARDUINO_USB_CDC_ON_BOOT
+                // 19 + 20 = USB-JTAG. Not recommended for other uses.
+                case 19: FastLED.addLeds<NEOPIXEL, 19>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 20: FastLED.addLeds<NEOPIXEL, 20>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+            #endif
+                case 21: FastLED.addLeds<NEOPIXEL, 21>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // // 22 to 32: not connected, or SPI FLASH
+                // case 22: FastLED.addLeds<NEOPIXEL, 22>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 23: FastLED.addLeds<NEOPIXEL, 23>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 24: FastLED.addLeds<NEOPIXEL, 24>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 25: FastLED.addLeds<NEOPIXEL, 25>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 26: FastLED.addLeds<NEOPIXEL, 26>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 27: FastLED.addLeds<NEOPIXEL, 27>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 28: FastLED.addLeds<NEOPIXEL, 28>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 29: FastLED.addLeds<NEOPIXEL, 29>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 30: FastLED.addLeds<NEOPIXEL, 30>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 31: FastLED.addLeds<NEOPIXEL, 31>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // case 32: FastLED.addLeds<NEOPIXEL, 32>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+            #if !defined(BOARD_HAS_PSRAM)
+                // 33 to 37: reserved if using _octal_ SPI Flash or _octal_ PSRAM
+                case 33: FastLED.addLeds<NEOPIXEL, 33>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 34: FastLED.addLeds<NEOPIXEL, 34>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 35: FastLED.addLeds<NEOPIXEL, 35>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 36: FastLED.addLeds<NEOPIXEL, 36>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 37: FastLED.addLeds<NEOPIXEL, 37>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+            #endif
+                case 38: FastLED.addLeds<NEOPIXEL, 38>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 39: FastLED.addLeds<NEOPIXEL, 39>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 40: FastLED.addLeds<NEOPIXEL, 40>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 41: FastLED.addLeds<NEOPIXEL, 41>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 42: FastLED.addLeds<NEOPIXEL, 42>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                // 43+44 = Serial RX+TX --> don't use for LEDS when serial-to-USB is needed
+                case 43: FastLED.addLeds<NEOPIXEL, 43>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 44: FastLED.addLeds<NEOPIXEL, 44>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 45: FastLED.addLeds<NEOPIXEL, 45>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 46: FastLED.addLeds<NEOPIXEL, 46>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 47: FastLED.addLeds<NEOPIXEL, 47>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+                case 48: FastLED.addLeds<NEOPIXEL, 48>(fixture.ledsP, startLed, nrOfLeds).setCorrection(TypicalLEDStrip); break;
+              #endif //CONFIG_IDF_TARGET_ESP32S3
+
               default: USER_PRINTF("FastLedPin assignment: pin not supported %d\n", pinNr);
             }
           }
@@ -352,7 +543,7 @@ public:
   } //loop
 
   void loop1s() {
-    mdl->setValueLossy("realFps", "%lu /s", frameCounter);
+    mdl->setUIValueV("realFps", "%lu /s", frameCounter);
     frameCounter = 0;
   }
 

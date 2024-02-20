@@ -1,65 +1,67 @@
 // @title     StarMod
 // @file      app.js
-// @date      20231016
+// @date      20240114
 // @repo      https://github.com/ewowi/StarMod
 // @Authors   https://github.com/ewowi/StarMod/commits/main
-// @Copyright (c) 2023 Github StarMod Commit Authors
+// @Copyright (c) 2024 Github StarMod Commit Authors
 // @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+// @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 
-function userFun(userFunId, data) {
-  if (userFunId == "pview" && jsonValues.pview) {
-    let leds = new Uint8Array(data);
+function userFun(data) {
+  let buffer = new Uint8Array(data);
+  if (buffer[0]==1 && jsonValues.pview) {
     let pviewNode = gId("pview");
 
     //replace the canvas: in case we switch from 2D to 3D as they cannot be reused between them
-    if (jsonValues.pview.new)
-    {
-      console.log("replace the canvas!", jsonValues.pview);
-      let canvasNode = cE("canvas");
-      canvasNode.width = pviewNode.width;
-      canvasNode.height = pviewNode.height;
-      canvasNode.draggable = true;
-      canvasNode.addEventListener('dragstart', (event) => {event.preventDefault(); event.stopPropagation();});
+    //not needed anymore as we do only three.js
+    // if (jsonValues.pview.new)
+    // {
+    //   console.log("replace the canvas!", jsonValues.pview);
+    //   let canvasNode = cE("canvas");
+    //   canvasNode.width = pviewNode.width;
+    //   canvasNode.height = pviewNode.height;
+    //   canvasNode.className = pviewNode.className;
+    //   canvasNode.draggable = true;
+    //   canvasNode.addEventListener('dragstart', (event) => {event.preventDefault(); event.stopPropagation();});
 
-      pviewNode.parentNode.replaceChild(canvasNode, pviewNode);
-      pviewNode = canvasNode;
-      pviewNode.id = "pview";
-      pviewNode.addEventListener('dblclick', (event) => {toggleModal(event.target);});
-    }
+    //   pviewNode.parentNode.replaceChild(canvasNode, pviewNode);
+    //   pviewNode = canvasNode;
+    //   pviewNode.id = "pview";
+    //   pviewNode.addEventListener('dblclick', (event) => {toggleModal(event.target);});
+    // }
 
-    // console.log("userFun", leds);
+    // console.log("userFun", buffer);
 
     // if (jsonValues.pview.depth == 1)
-    //   preview2D(pviewNode, leds);
+    //   preview2D(pviewNode, buffer);
     // else
-      preview3D(pviewNode, leds);
+      preview3D(pviewNode, buffer);
 
     return true;
   }
-  else if (userFunId == "board") {
-    let leds = new Uint8Array(data);
+  else if (buffer[0]==0) {
     let pviewNode = gId("board");
-    // console.log(leds, pviewNode);
-    previewBoard(pviewNode, leds);
+    // console.log(buffer, pviewNode);
+    previewBoard(pviewNode, buffer);
   }
   return false;
 }
 
-function preview2D(node, leds) {
-  let ctx = node.getContext('2d');
-  let i = 4;
+function preview2D(canvasNode, buffer) {
+  let ctx = canvasNode.getContext('2d');
+  let i = 5;
   let factor = 10;//fixed value: from mm to cm
-  ctx.clearRect(0, 0, node.width, node.height);
+  ctx.clearRect(0, 0, canvasNode.width, canvasNode.height);
   if (jsonValues.pview) {
-    let pPL = Math.min(node.width / jsonValues.pview.width, node.height / jsonValues.pview.height); // pixels per LED (width of circle)
-    let lOf = Math.floor((node.width - pPL*jsonValues.pview.width)/2); //left offeset (to center matrix)
+    let pPL = Math.min(canvasNode.width / jsonValues.pview.width, canvasNode.height / jsonValues.pview.height); // pixels per LED (width of circle)
+    let lOf = Math.floor((canvasNode.width - pPL*jsonValues.pview.width)/2); //left offeset (to center matrix)
     if (jsonValues.pview.outputs) {
       // console.log("preview2D jsonValues", jsonValues.pview);
       for (var output of jsonValues.pview.outputs) {
-        if (output.leds) {
-          for (var led of output.leds) {
-            if (leds[i] + leds[i+1] + leds[i+2] > 20) { //do not show nearly blacks
-              ctx.fillStyle = `rgb(${leds[i]},${leds[i+1]},${leds[i+2]})`;
+        if (output.buffer) {
+          for (var led of output.buffer) {
+            if (buffer[i] + buffer[i+1] + buffer[i+2] > 20) { //do not show nearly blacks
+              ctx.fillStyle = `rgb(${buffer[i]},${buffer[i+1]},${buffer[i+2]})`;
               ctx.beginPath();
               ctx.arc(led[0]*pPL/factor + lOf, led[1]*pPL/factor, pPL*0.4, 0, 2 * Math.PI);
               ctx.fill();
@@ -77,7 +79,7 @@ function preview2D(node, leds) {
       console.log("preview2D jsonValues no outputs", jsonValues.pview);
       jsonValues.pview = null;
     }
-    jsonValues.pview.new = false;
+    jsonValues.pview.new = null;
   }
 }
 
@@ -90,16 +92,15 @@ let intersect = null;
 let mousePointer = null;
 
 //https://stackoverflow.com/questions/8426822/rotate-camera-in-three-js-with-mouse
-function preview3D(node, leds) {
+
+//inspiration: https://discoverthreejs.com/book/first-steps/transformations/
+function preview3D(canvasNode, buffer) {
   //3D vars
-  // let mW = leds[0];
-  // let mH = leds[1];
-  // let mD = leds[2];
   import ('three').then((THREE) => {
 
     function onMouseMove( event ) {
 
-      let canvasRect = node.getBoundingClientRect();
+      let canvasRect = canvasNode.getBoundingClientRect();
     
       if (!mousePointer) mousePointer = new THREE.Vector2();
       mousePointer.x = ((event.clientX - canvasRect.left) / canvasRect.width) * 2 - 1;
@@ -130,7 +131,7 @@ function preview3D(node, leds) {
         gId("canvasMenu").style.left = (event.clientX) + "px"; // - rect.left
         gId("canvasMenu").style.top = (event.clientY) + "px"; //- rect.top
         gId("canvasMenu").style.display = ""; //not none -> show
-        let sp = intersect.name.split(" - ");
+        let sp = intersect.name.split(" - "); //output and led index is encoded in the name
         gId("canvasData").innerText = jsonValues.pview.outputs[sp[0]].leds[sp[1]];// event.clientY;
       }
       // else{
@@ -148,16 +149,12 @@ function preview3D(node, leds) {
 
         console.log("preview3D create new renderer");
 
-        renderer = new THREE.WebGLRenderer({canvas: node, antialias: true, alpha: true });
+        renderer = new THREE.WebGLRenderer({canvas: canvasNode, antialias: true, alpha: true });
         // THREE.Object3D.DefaultUp = new THREE.Vector3(0,1,1);
         renderer.setClearAlpha(0)
         renderer.setClearColor( 0x000000, 0 );
-        // renderer.setSize( 300, 150);
-        // node.parentNode.appendChild( renderer.domElement );
-        // rect = renderer.domElement.getBoundingClientRect();
 
-        camera = new THREE.PerspectiveCamera( 45, node.width/node.height, 1, 500);
-        // const camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 0.1, 2000 );
+        camera = new THREE.PerspectiveCamera( 45, canvasNode.width/canvasNode.width, 1, 500); //aspectRatio is 1 for the time being
         camera.position.set( 0, 0, d*Math.sqrt(jsonValues.pview.width*jsonValues.pview.width + jsonValues.pview.height*jsonValues.pview.height + jsonValues.pview.depth*jsonValues.pview.depth) );
         camera.lookAt( 0, 0, 0 );
 
@@ -172,8 +169,8 @@ function preview3D(node, leds) {
 
         raycaster = new THREE.Raycaster();
 
-        node.addEventListener( 'mousemove', onMouseMove );
-        node.addEventListener('mousedown', onMouseDown, false);
+        canvasNode.addEventListener( 'mousemove', onMouseMove );
+        canvasNode.addEventListener('mousedown', onMouseDown, false);
         //prevent default behavior
         // if (gId("canvasMenu").addEventListener) {
         //   gId("canvasMenu").addEventListener('contextmenu', function (e) {
@@ -187,11 +184,21 @@ function preview3D(node, leds) {
         //   });
         // }
 
-        gId("canvasButton").innerText = "Set Mid Point";
+        gId("canvasButton1").innerText = "Set Start position";
+        gId("canvasButton2").innerText = "Set End position";
 
         //process canvas button click
-        gId("canvasButton").addEventListener("click", function(){
-          sendValue(gId("canvasData"));
+        gId("canvasButton1").addEventListener("click", function(){
+          var command = {};
+          command["canvasData"] = "start:" + gId("canvasData").innerText;
+          requestJson(command);
+
+          gId("canvasMenu").style.display = "none";
+        }, false);
+        gId("canvasButton2").addEventListener("click", function(){
+          var command = {};
+          command["canvasData"] = "end:" + gId("canvasData").innerText;
+          requestJson(command);
           gId("canvasMenu").style.display = "none";
         }, false);
         
@@ -220,7 +227,7 @@ function preview3D(node, leds) {
                 const material = new THREE.MeshBasicMaterial({transparent: true, opacity: 0.7});
                 // material.color = new THREE.Color(`${x/mW}`, `${y/mH}`, `${z/mD}`);
                 const sphere = new THREE.Mesh( geometry, material );
-                sphere.position.set(offset_x + d*led[0]/factor, offset_y + d*led[1]/factor, offset_z + d*led[2]/factor);
+                sphere.position.set(offset_x + d*led[0]/factor, -offset_y - d*led[1]/factor, - offset_z - d*led[2]/factor);
                 sphere.name = outputsIndex + " - " + ledsIndex++;
                 scene.add( sphere );
               }
@@ -236,15 +243,19 @@ function preview3D(node, leds) {
           console.log("preview3D jsonValues no outputs", jsonValues.pview);
           jsonValues.pview = null;
         }
-        jsonValues.pview.new = false;
+        jsonValues.pview.new = null;
       }
 
       //animate / render
       if (jsonValues.pview) {
-        if (renderer.width != gId("pview").width || renderer.height != gId("pview").height)
-          renderer.setSize( gId("pview").width, gId("pview").height);
+        //https://stackoverflow.com/questions/29884485/threejs-canvas-size-based-on-container
+        if (canvasNode.width != canvasNode.clientWidth) { //} || canvasNode.height != canvasNode.clientHeight) {
+          console.log("3D pview update size", canvasNode.width, canvasNode.clientWidth, canvasNode.height, canvasNode.clientHeight);
+          renderer.setSize(canvasNode.clientWidth, canvasNode.clientWidth, false); //Setting updateStyle to false prevents any style changes to the output canvas.
+        }
+
         //light up the cube
-        let firstLed = 4;
+        let firstLed = 5;
         var i = 1;
         if (jsonValues.pview.outputs) {
           // console.log("preview3D jsonValues", jsonValues.pview);
@@ -252,9 +263,9 @@ function preview3D(node, leds) {
             if (output.leds) {
               for (var led of output.leds) {
                 if (i < scene.children.length) {
-                  scene.children[i].visible = leds[i*3 + firstLed] + leds[i*3 + firstLed + 1] + leds[i*3 + firstLed+2] > 10; //do not show blacks
+                  scene.children[i].visible = buffer[i*3 + firstLed] + buffer[i*3 + firstLed + 1] + buffer[i*3 + firstLed+2] > 10; //do not show blacks
                   if (scene.children[i].visible)
-                    scene.children[i].material.color = new THREE.Color(`${leds[i*3 + firstLed]/255}`, `${leds[i*3 + firstLed + 1]/255}`, `${leds[i*3 + firstLed + 2]/255}`);
+                    scene.children[i].material.color = new THREE.Color(`${buffer[i*3 + firstLed]/255}`, `${buffer[i*3 + firstLed + 1]/255}`, `${buffer[i*3 + firstLed + 2]/255}`);
                 }
                 i++;
               }
@@ -270,6 +281,11 @@ function preview3D(node, leds) {
           jsonValues.pview = null;
         }
       }
+
+      // controls.rotateSpeed = 0.4;
+      scene.rotation.x = buffer[1];
+      scene.rotation.y = buffer[2];
+      scene.rotation.z = buffer[3];
 
       controls.update(); // apply orbit controls
 
@@ -305,18 +321,18 @@ function preview3D(node, leds) {
   }); //import Three
 } //preview3D
 
-function previewBoard(node, leds) {
-  let ctx = node.getContext('2d');
+function previewBoard(canvasNode, buffer) {
+  let ctx = canvasNode.getContext('2d');
   //assuming 20 pins
   let mW = 10; // matrix width
   let mH = 2; // matrix height
-  let pPL = Math.min(node.width / mW, node.height / mH); // pixels per LED (width of circle)
-  let lOf = Math.floor((node.width - pPL*mW)/2); //left offeset (to center matrix)
-  let i = 4;
-  ctx.clearRect(0, 0, node.width, node.height);
+  let pPL = Math.min(canvasNode.width / mW, canvasNode.height / mH); // pixels per LED (width of circle)
+  let lOf = Math.floor((canvasNode.width - pPL*mW)/2); //left offeset (to center matrix)
+  let i = 5;
+  ctx.clearRect(0, 0, canvasNode.width, canvasNode.height);
   for (let y=0.5;y<mH;y++) for (let x=0.5; x<mW; x++) {
-    if (leds[i] + leds[i+1] + leds[i+2] > 20) { //do not show nearly blacks
-      ctx.fillStyle = `rgb(${leds[i]},${leds[i+1]},${leds[i+2]})`;
+    if (buffer[i] + buffer[i+1] + buffer[i+2] > 20) { //do not show nearly blacks
+      ctx.fillStyle = `rgb(${buffer[i]},${buffer[i+1]},${buffer[i+2]})`;
       ctx.beginPath();
       ctx.arc(x*pPL+lOf, y*pPL, pPL*0.4, 0, 2 * Math.PI);
       ctx.fill();

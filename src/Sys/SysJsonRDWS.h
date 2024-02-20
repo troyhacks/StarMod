@@ -1,12 +1,13 @@
 /*
    @title     StarMod
    @file      SysJsonRDWS.h
-   @date      20231016
+   @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2023 Github StarMod Commit Authors
+   @Copyright (c) 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
- */
+   @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
+*/
 
 //Lazy Json Read Deserialize Write Serialize (write / serialize not implemented yet)
 //ArduinoJson won't work on very large fixture.json, this does
@@ -220,11 +221,11 @@ private:
     for (std::vector<VarDetails>::iterator vd=varDetails.begin(); vd!=varDetails.end(); ++vd) {
       // USER_PRINTF("check %s %s %s\n", vd->id, varId, value);
       if (strcmp(vd->id, varId)==0) {
-        // USER_PRINTF("JsonRDWS found %s:%s %d %s\n", varId, vd->type, vd->index, value?value:"", uint16CollectList.size());
-        if (strcmp(vd->type, "uint8") ==0) *uint8List[vd->index] = atoi(value);
-        if (strcmp(vd->type, "uint16") ==0) *uint16List[vd->index] = atoi(value);
-        if (strcmp(vd->type, "char") ==0) strncpy(charList[vd->index], value, 31); //assuming size 32-1 here
-        if (strcmp(vd->type, "fun") ==0) funList[vd->index](uint16CollectList);
+        // USER_PRINTF("JsonRDWS found %s:%s %d %s %d %d\n", varId, vd->type, vd->index, value?value:"", uint16CollectList.size(), funList.size());
+        if (strcmp(vd->type, "uint8") ==0 && value) *uint8List[vd->index] = atoi(value);
+        if (strcmp(vd->type, "uint16") ==0 && value) *uint16List[vd->index] = atoi(value);
+        if (strcmp(vd->type, "char") ==0 && value) strncpy(charList[vd->index], value, 31); //assuming size 32-1 here
+        if (strcmp(vd->type, "fun") ==0) funList[vd->index](uint16CollectList); //call for every found item (no value check)
         foundCounter++;
       }
     }
@@ -273,8 +274,11 @@ private:
     else if (variant.is<bool>()) {
       f.printf("%s", variant.as<bool>()?"true":"false");      
     }
+    else if (variant.isNull()) {
+      f.print("null");      
+    }
     else
-      USER_PRINTF("%s not supported", variant.as<String>());
+      USER_PRINTF("dev JsonRDWS write %s not supported\n", variant.as<String>().c_str());
   }
 
 };

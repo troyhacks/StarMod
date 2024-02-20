@@ -1,11 +1,12 @@
 /*
    @title     StarMod
    @file      SysModules.cpp
-   @date      20231016
+   @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2023 Github StarMod Commit Authors
+   @Copyright (c) 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+   @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
 
 #include "SysModules.h"
@@ -18,9 +19,6 @@ bool SysModules::newConnection = false;
 bool SysModules::isConnected = false;
 
 SysModules::SysModules() {
-  USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
-
-  USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
 };
 
 void SysModules::setup() {
@@ -29,41 +27,62 @@ void SysModules::setup() {
   }
 
   //do its own setup: will be shown as last module
-  JsonObject parentVar;
-  parentVar = ui->initModule(parentVar, "Modules");
+  JsonObject parentVar = ui->initSysMod(parentVar, "Modules");
+  if (mdl->varOrder(parentVar) > -1000) mdl->varOrder(parentVar, -5000); //set default order. Don't use auto generated order as order can be changed in the ui (WIP)
 
-  JsonObject tableVar = ui->initTable(parentVar, "mdlTbl", nullptr, false, [this](JsonObject var) { //uiFun
-    web->addResponse(var["id"], "label", "Modules");
-    web->addResponse(var["id"], "comment", "List of modules");
-    JsonArray rows = web->addResponseA(var["id"], "data");
-    for (SysModule *module:modules) {
-      JsonArray row = rows.createNestedArray();
-      row.add(module->name);  //create a copy!
-      row.add(module->success);
-      row.add(module->isEnabled);
-    }
-  });
-  ui->initText(tableVar, "mdlName", nullptr, 32, true, [](JsonObject var) { //uiFun
-    web->addResponse(var["id"], "label", "Name");
-  });
-  ui->initCheckBox(tableVar, "mdlSucces", false, true, [](JsonObject var) { //uiFun
-    web->addResponse(var["id"], "label", "Success");
-  });
-  ui->initCheckBox(tableVar, "mdlEnabled", true, false, [](JsonObject var) { //uiFun not readonly! (tbd)
-    //initially set to true, but as enabled are table cells, will be updated to an array
-    web->addResponse(var["id"], "label", "Enabled");
-  }, [this](JsonObject var, uint8_t rowNr) { //chFun
+  JsonObject tableVar = ui->initTable(parentVar, "mdlTbl", nullptr, true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    case f_UIFun:
+      ui->setLabel(var, "Modules");
+      ui->setComment(var, "List of modules");
+      return true;
+    default: return false;
+  }});
 
-    if (rowNr != uint8Max) {
-      modules[rowNr]->isEnabled = var["value"][rowNr];
-      modules[rowNr]->enabledChanged();
-    }
-    else {
-      USER_PRINTF(" no rowNr!!");
-    }
-    print->printJson(" ", var);
+  ui->initText(tableVar, "mdlName", nullptr, 32, true, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    case f_ValueFun:
+      for (uint8_t rowNr = 0; rowNr < modules.size(); rowNr++)
+        mdl->setValue(var, JsonString(modules[rowNr]->name, JsonString::Copied), rowNr);
+      return true;
+    case f_UIFun:
+      ui->setLabel(var, "Name");
+      return true;
+    default: return false;
+  }});
 
-  });
+  //UINT16_MAX: no value set
+  ui->initCheckBox(tableVar, "mdlSuccess", UINT16_MAX, true, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    case f_ValueFun:
+      for (uint8_t rowNr = 0; rowNr < modules.size(); rowNr++)
+        mdl->setValue(var, modules[rowNr]->success, rowNr);
+      return true;
+    case f_UIFun:
+      ui->setLabel(var, "Success");
+      return true;
+    default: return false;
+  }});
+
+  ui->initCheckBox(tableVar, "mdlEnabled", UINT16_MAX, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun not readonly! (tbd)
+    case f_ValueFun:
+      //never a rowNr as parameter, set all
+      for (uint8_t rowNr = 0; rowNr < modules.size(); rowNr++)
+        mdl->setValue(var, modules[rowNr]->isEnabled, rowNr);
+      return true;
+    case f_UIFun:
+      //initially set to true, but as enabled are table cells, will be updated to an array
+      ui->setLabel(var, "Enabled");
+      return true;
+    case f_ChangeFun:
+      if (rowNr != UINT8_MAX && rowNr < modules.size()) {
+        modules[rowNr]->isEnabled = mdl->getValue(var, rowNr);
+        modules[rowNr]->enabledChanged();
+      }
+      else {
+        USER_PRINTF(" no rowNr or > modules.size!!", rowNr);
+      }
+      // print->printJson(" ", var);
+      return true;
+    default: return false;
+  }});
 }
 
 void SysModules::loop() {

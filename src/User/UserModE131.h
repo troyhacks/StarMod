@@ -1,17 +1,16 @@
 /*
    @title     StarMod
    @file      UserModE131.h
-   @date      20231016
+   @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2023 Github StarMod Commit Authors
+   @Copyright (c) 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+   @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
 
 #pragma once
 #include <ESPAsyncE131.h>
-
-#include <vector>
 
 #define maxChannels 513
 
@@ -20,56 +19,89 @@ class UserModE131:public SysModule {
 public:
 
   UserModE131() :SysModule("e131-sACN") {
-    USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
-
-    USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
   };
 
   //setup filesystem
   void setup() {
     SysModule::setup();
-    USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
-    parentVar = ui->initModule(parentVar, name);
+    parentVar = ui->initUserMod(parentVar, name);
+    if (parentVar["o"] > -1000) parentVar["o"] = -3200; //set default order. Don't use auto generated order as order can be changed in the ui (WIP)
 
-    ui->initNumber(parentVar, "dun", universe, 0, 7, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "DMX Universe");
-    }, [this](JsonObject var, uint8_t) { //chFun
-      universe = var["value"];
-    });
+    ui->initNumber(parentVar, "dun", universe, 0, 7, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_UIFun:
+        ui->setLabel(var, "DMX Universe");
+        return true;
+      case f_ChangeFun:
+        universe = var["value"];
+        return true;
+      default: return false;
+    }});
 
-    JsonObject currentVar = ui->initNumber(parentVar, "dch", 1, 1, 512, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "DMX Channel");
-      web->addResponse(var["id"], "comment", "First channel");
-    }, [](JsonObject var, uint8_t) { //chFun
-      ui->processUiFun("e131Tbl"); //rebuild table
-    });
+    JsonObject currentVar = ui->initNumber(parentVar, "dch", 1, 1, 512, false, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_UIFun:
+        ui->setLabel(var, "DMX Channel");
+        ui->setComment(var, "First channel");
+        return true;
+      case f_ChangeFun:
+        for (JsonObject childVar: mdl->varN("e131Tbl"))
+          ui->callVarFun(childVar, UINT8_MAX, f_ValueFun);
+        return true;
+      default: return false;
+    }});
     currentVar["stage"] = true;
 
-    JsonObject tableVar = ui->initTable(parentVar, "e131Tbl", nullptr, false, [this](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Vars to watch");
-      web->addResponse(var["id"], "comment", "List of instances");
-      JsonArray rows = web->addResponseA(var["id"], "data");
-      for (auto varToWatch: varsToWatch) {
-        JsonArray row = rows.createNestedArray();
-        row.add(varToWatch.channel + mdl->getValue("dch").as<uint8_t>());
-        row.add((char *)varToWatch.id);
-        row.add(varToWatch.max);
-        row.add(varToWatch.savedValue);
-      }
-    });
-    ui->initNumber(tableVar, "e131Channel", -1, 1, 512, true, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Channel");
-    });
-    ui->initText(tableVar, "e131Name", nullptr, 32, true, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Name");
-    });
-    ui->initNumber(tableVar, "e131Max", -1, 0, uint16Max, true, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Max");
-    });
-    ui->initNumber(tableVar, "e131Value", -1, 0, 255, true, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Value");
-    });
+    JsonObject tableVar = ui->initTable(parentVar, "e131Tbl", nullptr, true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_UIFun:
+        ui->setLabel(var, "Vars to watch");
+        ui->setComment(var, "List of instances");
+        return true;
+      default: return false;
+    }});
+
+    ui->initNumber(tableVar, "e131Channel", UINT16_MAX, 1, 512, true, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_ValueFun:
+        for (uint8_t rowNr = 0; rowNr < varsToWatch.size(); rowNr++)
+          mdl->setValue(var, varsToWatch[rowNr].channel + mdl->getValue("dch").as<uint8_t>(), rowNr);
+        return true;
+      case f_UIFun:
+        ui->setLabel(var, "Channel");
+        return true;
+      default: return false;
+    }});
+
+    ui->initText(tableVar, "e131Name", nullptr, 32, true, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_ValueFun:
+        for (uint8_t rowNr = 0; rowNr < varsToWatch.size(); rowNr++)
+          mdl->setValue(var, varsToWatch[rowNr].id, rowNr);
+        return true;
+      case f_UIFun:
+        ui->setLabel(var, "Name");
+        return true;
+      default: return false;
+    }});
+
+    ui->initNumber(tableVar, "e131Max", UINT16_MAX, 0, UINT16_MAX, true, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_ValueFun:
+        for (uint8_t rowNr = 0; rowNr < varsToWatch.size(); rowNr++)
+          mdl->setValue(var, varsToWatch[rowNr].max, rowNr);
+        return true;
+      case f_UIFun:
+        ui->setLabel(var, "Max");
+        return true;
+      default: return false;
+    }});
+
+    ui->initNumber(tableVar, "e131Value", UINT16_MAX, 0, 255, true, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_ValueFun:
+        for (uint8_t rowNr = 0; rowNr < varsToWatch.size(); rowNr++)
+          mdl->setValue(var, varsToWatch[rowNr].savedValue, rowNr);
+        return true;
+      case f_UIFun:
+        ui->setLabel(var, "Value");
+        return true;
+      default: return false;
+    }});
 
   }
 
@@ -135,7 +167,7 @@ public:
 
               if (varToWatch->id != nullptr && varToWatch->max != 0) {
                 USER_PRINTF(" varsToWatch: %s\n", varToWatch->id);
-                mdl->setValueI(varToWatch->id, varToWatch->savedValue%(varToWatch->max+1)); // TODO: ugly to have magic string 
+                mdl->setValue(varToWatch->id, varToWatch->savedValue%(varToWatch->max+1)); // TODO: ugly to have magic string 
               }
               else
                 USER_PRINTF("\n");

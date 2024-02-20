@@ -1,12 +1,13 @@
 /*
    @title     StarMod
    @file      SysModFiles.cpp
-   @date      20231016
+   @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2023 Github StarMod Commit Authors
+   @Copyright (c) 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
- */
+   @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
+*/
 
 #include "SysModFiles.h"
 #include "SysModUI.h"
@@ -16,97 +17,125 @@
 
 // #include <FS.h>
 
-bool SysModFiles::filesChanged = false;
+bool SysModFiles::filesChanged = true; //init fileTbl
 
 SysModFiles::SysModFiles() :SysModule("Files") {
-  USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
-
   if (!LittleFS.begin(true)) { //true: formatOnFail
     USER_PRINTF(" An Error has occurred while mounting File system");
     USER_PRINTF(" fail\n");
     success = false;
   }
-
-  USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
 };
 
 //setup filesystem
 void SysModFiles::setup() {
   SysModule::setup();
-  parentVar = ui->initModule(parentVar, name);
+  parentVar = ui->initSysMod(parentVar, name);
+  if (parentVar["o"] > -1000) parentVar["o"] = -2000; //set default order. Don't use auto generated order as order can be changed in the ui (WIP)
 
-  JsonObject tableVar = ui->initTable(parentVar, "fileTbl", nullptr, false, [this](JsonObject var) { //uiFun
-    web->addResponse(var["id"], "label", "Files");
-    web->addResponse(var["id"], "comment", "List of files");
-    JsonArray rows = web->addResponseA(var["id"], "data");
-    dirToJson(rows);
-  });
-  ui->initText(tableVar, "flName", nullptr, 32, true, [](JsonObject var) { //uiFun
-    web->addResponse(var["id"], "label", "Name");
-  });
-  ui->initNumber(tableVar, "flSize", -1, 0, uint16Max, true, [](JsonObject var) { //uiFun
-    web->addResponse(var["id"], "label", "Size (B)");
-  });
-  ui->initURL(tableVar, "flLink", nullptr, true, [](JsonObject var) { //uiFun
-    web->addResponse(var["id"], "label", "Show");
-  });
-  ui->initButton(tableVar, "flDel", "⌫", false, [](JsonObject var) { //uiFun
-    web->addResponse(var["id"], "label", "Delete"); //table header title
-  }, [this, tableVar](JsonObject var, uint8_t rowNr) { //chFun
+  JsonObject tableVar = ui->initTable(parentVar, "fileTbl", nullptr, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    case f_UIFun:
+      ui->setLabel(var, "Files");
+      ui->setComment(var, "List of files");
+      return true;
+    case f_AddRow:
+      USER_PRINTF("chFun addRow %s[%d] = %s\n", mdl->varID(var), rowNr, var["value"].as<String>().c_str());
+      web->getResponseObject()["addRow"]["rowNr"] = rowNr;
+      //add a row with all defaults
+      return true;
+    case f_DelRow:
+      if (rowNr != UINT8_MAX && rowNr < fileList.size()) {
+        const char * fileName = fileList[rowNr].name;
+        USER_PRINTF("chFun delRow %s[%d] = %s %s\n", mdl->varID(var), rowNr, var["value"].as<String>().c_str(), fileName);
+        this->removeFiles(fileName, false);
+      }
+      print->printJson(" ", var);
+      return true;
+    default: return false;
+  }});
 
-    if (rowNr != uint8Max) {
-      // call uiFun of tbl to fill responseVariant with files
-      ui->uFunctions[tableVar["uiFun"]](tableVar);
-      //get the table values
-      JsonVariant responseVariant = web->getResponseDoc()->as<JsonVariant>();
-      JsonArray row = responseVariant["fileTbl"]["data"][rowNr];
-      const char * fileName = row[0]; //first column
-      print->printJson("\n", row);
-      removeFiles(fileName, false);
-    }
-    else {
-      USER_PRINTF(" no rowNr!!");
-    }
-    print->printJson(" ", var);
-  });
+  ui->initText(tableVar, "flName", nullptr, 32, true, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    case f_ValueFun:
+      for (uint8_t rowNr = 0; rowNr < fileList.size(); rowNr++)
+        mdl->setValue(var, JsonString(fileList[rowNr].name, JsonString::Copied), rowNr);
+      return true;
+    case f_UIFun:
+      ui->setLabel(var, "Name");
+      return true;
+    default: return false;
+  }});
 
-  ui->initText(parentVar, "drsize", nullptr, 32, true, [](JsonObject var) { //uiFun
-    char details[32] = "";
-    print->fFormat(details, sizeof(details)-1, "%d / %d B", files->usedBytes(), files->totalBytes());
-    web->addResponse(var["id"], "value", details);
-    web->addResponse(var["id"], "label", "Total FS size");
-  });
+  ui->initNumber(tableVar, "flSize", UINT16_MAX, 0, UINT16_MAX, true, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    case f_ValueFun:
+      for (uint8_t rowNr = 0; rowNr < fileList.size(); rowNr++)
+        mdl->setValue(var, fileList[rowNr].size, rowNr);
+      return true;
+    case f_UIFun:
+      ui->setLabel(var, "Size (B)");
+      return true;
+    default: return false;
+  }});
 
-  ui->initButton(parentVar, "deleteFiles", nullptr, false, [](JsonObject var) { //uiFun
-    web->addResponse(var["id"], "comment", "All but model.json");
-  }, [this](JsonObject var, uint8_t) { //chFun
-    USER_PRINTF("delete files\n");
-    removeFiles("model.json", true); //all but model.json
-  });
+  ui->initURL(tableVar, "flLink", nullptr, true, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    case f_ValueFun:
+      for (uint8_t rowNr = 0; rowNr < fileList.size(); rowNr++) {
+        char urlString[32] = "file/";
+        strncat(urlString, fileList[rowNr].name, sizeof(urlString)-1);
+        mdl->setValue(var, JsonString(urlString, JsonString::Copied), rowNr);
+      }
+      return true;
+    case f_UIFun:
+      ui->setLabel(var, "Show");
+      return true;
+    default: return false;
+  }});
 
-  // ui->initURL(parentVar, "urlTest", "file/3DCube202005.json", true);
-
-  web->addUpload("/upload");
-  web->addUpdate("/update");
-
-  web->addFileServer("/file");
+  ui->initProgress(parentVar, "drsize", UINT16_MAX, 0, files->totalBytes(), true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    case f_ValueFun:
+      mdl->setValue(var, files->usedBytes());
+      return true;
+    case f_UIFun:
+      ui->setLabel(var, "FS Size");
+      return true;
+    case f_ChangeFun:
+      var["max"] = files->totalBytes(); //makes sense?
+      web->addResponseV(var["id"], "comment", "%d / %d B", files->usedBytes(), files->totalBytes());
+      return true;
+    default: return false;
+  }});
 
 }
 
-void SysModFiles::loop(){
+void SysModFiles::loop() {
   // SysModule::loop();
 
-  // if (millis() - secondMillis >= 10000) {
-  //   secondMillis = millis();
-  //       // if something changed in fileTbl
-  // }
-
   if (filesChanged) {
-    mdl->setValueP("drsize", "%d / %d B", usedBytes(), totalBytes());
     filesChanged = false;
 
-    ui->processUiFun("fileTbl");
+    fileList.clear();
+
+    File root = LittleFS.open("/");
+    File file = root.openNextFile();
+
+    while (file) {
+      FileDetails details;
+      strcpy(details.name, file.name());
+      details.size = file.size();
+      fileList.push_back(details);
+      file.close();
+      file = root.openNextFile();
+    }
+    root.close();
+
+    ui->callVarFun(mdl->findVar("drsize"));
+
+    for (JsonObject childVar: mdl->varN("fileTbl"))
+      ui->callVarFun(childVar, UINT8_MAX, f_ValueFun);
   }
+}
+
+void SysModFiles::loop10s() {
+  ui->callVarFun(mdl->findVar("drsize"));
 }
 
 bool SysModFiles::remove(const char * path) {
@@ -136,16 +165,15 @@ void SysModFiles::dirToJson(JsonArray array, bool nameOnly, const char * filter)
 
     if (filter == nullptr || strstr(file.name(), filter) != nullptr) {
       if (nameOnly) {
-        array.add((char *)file.name());
+        array.add(JsonString(file.name(), JsonString::Copied));
       }
       else {
-        JsonArray row = array.createNestedArray();
-        row.add((char *)file.name());  //create a copy!
+        JsonArray row = array.add<JsonArray>();
+        row.add(JsonString(file.name(), JsonString::Copied));
         row.add(file.size());
         char urlString[32] = "file/";
         strncat(urlString, file.name(), sizeof(urlString)-1);
-        row.add((char *)urlString);  //create a copy!
-        row.add("⌫");  //delete placeholder
+        row.add(JsonString(urlString, JsonString::Copied));
       }
       // USER_PRINTF("FILE: %s %d\n", file.name(), file.size());
     }

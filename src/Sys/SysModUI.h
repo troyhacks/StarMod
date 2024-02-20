@@ -1,33 +1,41 @@
 /*
    @title     StarMod
    @file      SysModUI.h
-   @date      20231016
+   @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2023 Github StarMod Commit Authors
+   @Copyright (c) 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+   @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
 
 #pragma once
-#include <vector>
-#include "ArduinoJson.h"
 #include "SysModule.h"
 #include "SysModPrint.h"
+#include "SysModModel.h"
+#include "SysModules.h" //isConnected
+
+enum FunIDs
+{
+  f_ValueFun,
+  f_UIFun,
+  f_ChangeFun,
+  f_LoopFun,
+  f_AddRow,
+  f_DelRow,
+  f_count
+};
 
 // https://stackoverflow.com/questions/59111610/how-do-you-declare-a-lambda-function-using-typedef-and-then-use-it-by-passing-to
-typedef std::function<void(JsonObject)> UFun;
-typedef std::function<void(JsonObject, uint8_t)> CFun;
+typedef std::function<uint8_t(JsonObject, uint8_t, uint8_t)> VarFun;
 // typedef void(*LoopFun)(JsonObject, uint8_t*); //std::function is crashing...
-typedef std::function<void(JsonObject, uint8_t*)> LoopFun;
+// typedef std::function<void(JsonObject, uint8_t)> LoopFun;
 
 struct VarLoop {
   JsonObject var;
-  LoopFun loopFun;
-  size_t bufSize = 100;
-  uint16_t interval = 160; //160ms default
+  VarFun loopFun;
   unsigned long lastMillis = 0;
   unsigned long counter = 0;
-  unsigned long prevCounter = 0;
 };
 
 static uint8_t linearToLogarithm(JsonObject var, uint8_t value) {
@@ -50,7 +58,9 @@ class SysModUI:public SysModule {
 
 public:
   static bool stageVarChanged;// = false; //tbd: move mechanism to UserModInstances as there it will be used
-  static std::vector<UFun> uFunctions; //static because of static functions setChFunAndWs, processJson...
+  static std::vector<VarFun> varFunctions; //static because of static functions callChangeFun, processJson...
+
+  static uint8_t parentRowNr;
 
   SysModUI();
 
@@ -60,103 +70,190 @@ public:
   void loop();
   void loop1s();
 
-  JsonObject initModule(JsonObject parent, const char * id, const char * value = nullptr, bool readOnly = false, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<const char *>(parent, id, "module", value, 0, 0, readOnly, uiFun, chFun, loopFun);
+  JsonObject initAppMod(JsonObject parent, const char * id, const char * value = nullptr, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<const char *>(parent, id, "appmod", value, 0, 0, readOnly, varFun);
+  }
+  JsonObject initSysMod(JsonObject parent, const char * id, const char * value = nullptr, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<const char *>(parent, id, "sysmod", value, 0, 0, readOnly, varFun);
+  }
+  JsonObject initUserMod(JsonObject parent, const char * id, const char * value = nullptr, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<const char *>(parent, id, "usermod", value, 0, 0, readOnly, varFun);
   }
 
-  JsonObject initTable(JsonObject parent, const char * id, const char * value = nullptr, bool readOnly = false, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<const char *>(parent, id, "table", value, 0, 0, readOnly, uiFun, chFun, loopFun);
+  JsonObject initTable(JsonObject parent, const char * id, const char * value = nullptr, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<const char *>(parent, id, "table", value, 0, 0, readOnly, varFun);
   }
 
-  JsonObject initText(JsonObject parent, const char * id, const char * value = nullptr, uint16_t max = 32, bool readOnly = false, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<const char *>(parent, id, "text", value, 0, max, readOnly, uiFun, chFun, loopFun);
+  JsonObject initText(JsonObject parent, const char * id, const char * value = nullptr, uint16_t max = 32, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<const char *>(parent, id, "text", value, 0, max, readOnly, varFun);
   }
 
-  JsonObject initPassword(JsonObject parent, const char * id, const char * value = nullptr, uint8_t max = 32, bool readOnly = false, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<const char *>(parent, id, "password", value, 0, 0, readOnly, uiFun, chFun, loopFun);
+  JsonObject initPassword(JsonObject parent, const char * id, const char * value = nullptr, uint8_t max = 32, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<const char *>(parent, id, "password", value, 0, 0, readOnly, varFun);
   }
 
-  JsonObject initNumber(JsonObject parent, const char * id, int value, int min = 0, int max = uint16Max, bool readOnly = false, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<int>(parent, id, "number", value, min, max, readOnly, uiFun, chFun, loopFun);
+  JsonObject initNumber(JsonObject parent, const char * id, int value = UINT16_MAX, int min = 0, int max = UINT16_MAX, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<int>(parent, id, "number", value, min, max, readOnly, varFun);
+  }
+
+  JsonObject initProgress(JsonObject parent, const char * id, int value = UINT16_MAX, int min = 0, int max = 255, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<int>(parent, id, "progress", value, min, max, readOnly, varFun);
+  }
+
+  JsonObject initCoord3D(JsonObject parent, const char * id, Coord3D value = {UINT16_MAX, UINT16_MAX, UINT16_MAX}, int min = 0, int max = UINT16_MAX, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<Coord3D>(parent, id, "coord3D", value, min, max, readOnly, varFun);
   }
 
   //init a range slider, range between 0 and 255!
-  JsonObject initSlider(JsonObject parent, const char * id, int value, int min = 0, int max = 255, bool readOnly = false, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<int>(parent, id, "range", value, min, max, readOnly, uiFun, chFun, loopFun);
+  JsonObject initSlider(JsonObject parent, const char * id, int value = UINT16_MAX, int min = 0, int max = 255, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<int>(parent, id, "range", value, min, max, readOnly, varFun);
   }
 
-  JsonObject initCanvas(JsonObject parent, const char * id, int value, bool readOnly = false, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<int>(parent, id, "canvas", value, 0, 0, readOnly, uiFun, chFun, loopFun);
+  JsonObject initCanvas(JsonObject parent, const char * id, int value = UINT16_MAX, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<int>(parent, id, "canvas", value, 0, 0, readOnly, varFun);
   }
 
-  JsonObject initCheckBox(JsonObject parent, const char * id, bool value = false, bool readOnly = false, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<bool>(parent, id, "checkbox", value, 0, 0, readOnly, uiFun, chFun, loopFun);
+  //supports 3 state value: if UINT16_MAX it is indeterminated
+  JsonObject initCheckBox(JsonObject parent, const char * id, int value = UINT16_MAX, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<int>(parent, id, "checkbox", value, 0, 0, readOnly, varFun);
   }
 
-  JsonObject initButton(JsonObject parent, const char * id, const char * value = nullptr, bool readOnly = false, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<const char *>(parent, id, "button", value, 0, 0, readOnly, uiFun, chFun, loopFun);
+  //a button never gets a value
+  JsonObject initButton(JsonObject parent, const char * id, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<bool>(parent, id, "button", false, 0, 0, readOnly, varFun);
   }
 
-  JsonObject initSelect(JsonObject parent, const char * id, uint8_t value, bool readOnly = false, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<uint8_t>(parent, id, "select", value, 0, 0, readOnly, uiFun, chFun, loopFun);
+  JsonObject initSelect(JsonObject parent, const char * id, int value = UINT16_MAX, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<int>(parent, id, "select", value, 0, 0, readOnly, varFun);
   }
 
-  JsonObject initTextArea(JsonObject parent, const char * id, const char * value, bool readOnly = false, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<const char *>(parent, id, "textarea", value, 0, 0, readOnly, uiFun, chFun, loopFun);
+  JsonObject initTextArea(JsonObject parent, const char * id, const char * value = nullptr, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<const char *>(parent, id, "textarea", value, 0, 0, readOnly, varFun);
   }
 
-  JsonObject initURL(JsonObject parent, const char * id, const char * value = nullptr, bool readOnly = false, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    return initVarAndUpdate<const char *>(parent, id, "url", value, 0, 0, readOnly, uiFun, chFun, loopFun);
+  JsonObject initURL(JsonObject parent, const char * id, const char * value = nullptr, bool readOnly = false, VarFun varFun = nullptr) {
+    return initVarAndUpdate<const char *>(parent, id, "url", value, 0, 0, readOnly, varFun);
   }
 
   template <typename Type>
-  JsonObject initVarAndUpdate(JsonObject parent, const char * id, const char * type, Type value, int min, int max, bool readOnly = true, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr) {
-    JsonObject var = initVar(parent, id, type, readOnly, uiFun, chFun, loopFun);
-    bool isPointer = std::is_pointer<Type>::value;
-    //set a default if not a value yet
-    if (var["value"].isNull() && (!isPointer || value)) {
-      bool isChar = std::is_same<Type, const char *>::value;
-      if (isChar)
-        var["value"] = (char *)value; //if char make a copy !!
-      else
-        var["value"] = value; //if value is a pointer, it needs to have a value
+  JsonObject initVarAndUpdate(JsonObject parent, const char * id, const char * type, Type value, int min = 0, int max = 255, bool readOnly = true, VarFun varFun = nullptr) {
+    JsonObject var = initVar(parent, id, type, readOnly, varFun);
+    if (min) var["min"] = min;
+    if (max && max != UINT16_MAX) var["max"] = max;
+
+    if (parentRowNr != UINT8_MAX) {
+      USER_PRINTF("parentRowNr %s: %d for %s\n", mdl->varID(parent), parentRowNr, mdl->varID(var));
     }
 
-    if (min) var["min"] = min;
-    if (max && max != uint16Max) var["max"] = max;
-
-    //no call of fun for buttons otherwise all buttons will be fired which is highly undesirable
-    if (strcmp(type,"button") != 0 && chFun && (!isPointer || value)) { //!isPointer because 0 is also a value then
-      USER_PRINTF("chFun init %s v:%s\n", var["id"].as<const char *>(), var["value"].as<String>());
-      if (var["value"].is<JsonArray>()) {
-        int rowNr = 0;
-        for (JsonVariant val:var["value"].as<JsonArray>()) {
-          chFun(var, rowNr++);
+    bool valueNeedsUpdate = false;
+    if (strcmp(type, "button") != 0) { //button never gets a value
+      if (var["value"].isNull()) {
+        valueNeedsUpdate = true;
+        // print->printJson("initVarAndUpdate varFun value is null", var);
+      } else if (var["value"].is<JsonArray>()) {
+        JsonArray valueArray = var["value"].as<JsonArray>();
+        if (parentRowNr != UINT8_MAX) { // if var in table
+          if (parentRowNr >= valueArray.size())
+            valueNeedsUpdate = true;
+          else if (valueArray[parentRowNr].isNull())
+            valueNeedsUpdate = true;
         }
       }
-      else
-        chFun(var, uint8Max);
     }
+
+    if (valueNeedsUpdate) {
+      bool valueFunExists = false;
+      if (varFun) {
+        valueFunExists = varFun(var, parentRowNr, f_ValueFun);
+      }
+      if (!valueFunExists) { //setValue provided (if not null)
+        if (mdl->varRO(var) && !mdls->isConnected) {
+          mdl->setValueNoROCheck(var, value, parentRowNr); //does changefun if needed, if var in table, update the table row
+        } else
+          mdl->setValue(var, value, parentRowNr); //does changefun if needed, if var in table, update the table row
+      }
+    }
+    else { //do changeFun on existing value
+      //no call of chFun for buttons otherwise all buttons will be fired which is highly undesirable
+      if (strcmp(type,"button") != 0 && varFun ) { //!isPointer because 0 is also a value then && (!isPointer || value)
+        bool changeFunExists = false;
+        if (var["value"].is<JsonArray>()) {
+          int rowNr = 0;
+          for (JsonVariant val:var["value"].as<JsonArray>()) {
+            changeFunExists |= varFun(var, rowNr++, f_ChangeFun);
+          }
+        }
+        else {
+          changeFunExists = varFun(var, UINT8_MAX, f_ChangeFun); //if no rowNr use rowNr 0
+        }
+
+        if (changeFunExists)
+          USER_PRINTF("initVarAndUpdate chFun init %s[x] <- %s\n", mdl->varID(var), var["value"].as<String>().c_str());
+      }
+    }
+
+    if (parentRowNr != UINT8_MAX)
+      print->printJson("gravity var", web->getResponseObject());
+
     return var;
   }
 
-  JsonObject initVar(JsonObject parent, const char * id, const char * type, bool readOnly = true, UFun uiFun = nullptr, CFun chFun = nullptr, LoopFun loopFun = nullptr);
+  JsonObject initVar(JsonObject parent, const char * id, const char * type, bool readOnly = true, VarFun varFun = nullptr);
 
-  //run the change function and send response to all? websocket clients
-  static void setChFunAndWs(JsonObject var, uint8_t rowNr = uint8Max, const char * value = nullptr);
+  uint8_t callVarFun(const char * varID, uint8_t rowNr = UINT8_MAX, uint8_t funType = f_ChangeFun) {
+    JsonObject var = mdl->findVar(varID);
+    return callVarFun(var, rowNr, funType);
+  }
+
+  uint8_t callVarFun(JsonObject var, uint8_t rowNr = UINT8_MAX, uint8_t funType = f_ValueFun) {
+    uint8_t result = false;
+
+    if (!var["fun"].isNull()) {//isNull needed here!
+      size_t funNr = var["fun"];
+      if (funNr < varFunctions.size()) {
+        result = varFunctions[funNr](var, rowNr, funType);
+        // if (result) { //send rowNr = 0 if no rowNr
+        //   //only print vars with a value
+        //   if (!var["value"].isNull() && funType != f_ValueFun) {
+        //     USER_PRINTF("%sFun %s", funType==f_ValueFun?"val":funType==f_UIFun?"ui":funType==f_ChangeFun?"ch":funType==f_AddRow?"add":funType==f_DelRow?"del":"other", mdl->varID(var));
+        //     if (rowNr != UINT8_MAX)
+        //       USER_PRINTF("[%d] = %s\n", rowNr, var["value"][rowNr].as<String>().c_str());
+        //     else
+        //       USER_PRINTF(" = %s\n", var["value"].as<String>().c_str());
+        //   }
+        // }
+      }
+      else    
+        USER_PRINTF("dev callVarFun function nr %s outside bounds %d >= %d\n", mdl->varID(var), funNr, varFunctions.size());
+    }
+
+    //for ro variables, call valueFun to add also the value in responseDoc (as it is not stored in the model)
+    if (funType == f_UIFun && mdl->varRO(var)) {
+      callVarFun(var, rowNr, f_ValueFun);
+    }
+
+    return result;
+  }
 
   //interpret json and run commands or set values like deserializeJson / deserializeState / deserializeConfig
-  static const char * processJson(JsonVariant &json); //static for setupJsonHandlers
+  void processJson(JsonVariant json); //static for jsonHandler, must be Variant, not object for jsonhandler
 
   //called to rebuild selects and tables (tbd: also label and comments is done again, that is not needed)
-  void processUiFun(const char * id);
+  // void processUiFun(const char * id);
+
+  void setLabel(JsonObject var, const char * text) {
+    web->addResponse(var["id"], "label", text);
+  }
+  void setComment(JsonObject var, const char * text) {
+    web->addResponse(var["id"], "comment", text);
+  }
+  JsonArray setOptions(JsonObject var) {
+    return web->addResponseA(var["id"], "options");
+  }
 
 private:
-  static bool varLoopsChanged;// = false;
-
   static int varCounter; //not static crashes ??? (not called async...?)
 
-  static std::vector<CFun> cFunctions; //static because of static functions setChFunAndWs, processJson...
   static std::vector<VarLoop> loopFunctions; //non static crashing ...
 
 };

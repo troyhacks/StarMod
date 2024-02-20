@@ -1,11 +1,12 @@
 /*
    @title     StarMod
    @file      UserModWLEDAudio.h
-   @date      20231016
+   @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2023 Github StarMod Commit Authors
+   @Copyright (c) 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+   @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
 
 #pragma once
@@ -22,22 +23,15 @@ public:
   uint8_t fftResults[NUM_GEQ_CHANNELS]= {0};
 
   UserModWLEDAudio() :SysModule("WLED Audio Sync Receiver") {
-    USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
-
-    USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
   };
 
   //setup filesystem
   void setup() {
     SysModule::setup();
-    USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
-
-    USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
   }
 
   void onOffChanged() {
     if (SysModules::isConnected && isEnabled) {
-      USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
       sync.begin();
     } else {
       // sync.end();???

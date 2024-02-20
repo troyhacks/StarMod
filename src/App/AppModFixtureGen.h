@@ -1,11 +1,12 @@
 /*
    @title     StarMod
    @file      AppModFixtureGen.h
-   @date      20231016
+   @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2023 Github StarMod Commit Authors
+   @Copyright (c) 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+   @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
 
 #include "SysModule.h"
@@ -31,7 +32,7 @@ public:
   GenFix() {
     USER_PRINTF("GenFix construct\n");
     if (!mdl->getValue("pinList").isNull()) {
-      USER_PRINTF( "pinlist %s\n",mdl->getValue("pinList").as<const char *>());
+      USER_PRINTF( "pinlist %s\n", mdl->getValue("pinList").as<const char *>());
       char str[32];
       strncpy(str, mdl->getValue("pinList").as<const char *>(), sizeof(str)-1);
       const char s[2] = ","; //delimiter
@@ -106,11 +107,9 @@ public:
     f.close();
 
     files->remove("/temp.json");
-
   }
 
-  void 
-  openPin() {
+  void openPin() {
     uint8_t nextPin;
     if (pinNr < nrOfPins)
       nextPin = pinNr++;
@@ -125,6 +124,8 @@ public:
   }
 
   void write2D(uint16_t x, uint16_t y) {
+    if (x>UINT16_MAX/2 || y>UINT16_MAX/2) USER_PRINTF("write2D coord too high %d,%d\n",x, y);
+
     f.printf("%s[%d,%d]", pixelSep, x, y);
     width = max(width, x);
     height = max(height, y);
@@ -173,30 +174,32 @@ public:
     closePin();
   }
 
-  void matrix2D (uint16_t startX, uint16_t startY, uint16_t width, uint16_t height) {
+  void matrix2D (uint16_t startX, uint16_t startY, uint8_t panels, uint16_t width, uint16_t height) {
 
     openPin();
 
     //qad setup of serpentine, should be done better!
     bool serpentine = mdl->getValue("serpentine");
 
-    if (serpentine) {
-      for (uint8_t y = 0; y<height; y++) { //1cm distance between leds
-        if (y%2==0)
+    for (uint8_t panel=0; panel < panels; panel++) {
+      if (serpentine) {
+        for (uint8_t y = 0; y<height; y++) { //1cm distance between leds
+          if (y%2==0)
+            for (uint16_t x = 0; x<width ; x++) {
+              write2D(x*10+startX,y*10+startY);
+            }
+          else
+            for (int x = width-1; x>=0 ; x--) {
+              write2D(x*10+startX,y*10+startY);
+            }
+        }
+      }
+      else {
+        for (uint8_t y = 0; y<height; y++) //1cm distance between leds
           for (uint16_t x = 0; x<width ; x++) {
             write2D(x*10+startX,y*10+startY);
           }
-        else
-          for (int x = width-1; x>=0 ; x--) {
-            write2D(x*10+startX,y*10+startY);
-          }
       }
-    }
-    else {
-      for (uint8_t y = 0; y<height; y++) //1cm distance between leds
-        for (uint16_t x = 0; x<width ; x++) {
-          write2D(x*10+startX,y*10+startY);
-        }
     }
 
     closePin();
@@ -304,6 +307,30 @@ public:
     closePin();
   }
 
+  //https://stackoverflow.com/questions/71816702/coordinates-of-dot-on-an-hexagon-path
+  void hexagon2D (uint16_t startX, uint16_t startY, uint16_t amountOfDots, float radius) {
+
+    startX*=1.3;
+    startY*=1.3;
+
+    const float y = sqrtf(3)/2;
+    float hexaX[7] = {1.0, 0.5, -0.5, -1.0, -0.5, 0.5, 1.0};
+    float hexaY[7] = {0.0, y, y, 0, -y, -y, 0.0};
+
+    for (uint16_t i = 0; i < amountOfDots; i++) {
+      float offset = 6.0 * (float)i / (float)amountOfDots;
+      uint8_t edgenum = floor(offset);
+      offset = offset - (float)edgenum;
+
+      float x = (float)startX + radius * (hexaX[edgenum] + offset * (hexaX[edgenum + 1] - hexaX[edgenum]));
+      float y = (float)startY + radius * (hexaY[edgenum] + offset * (hexaY[edgenum + 1] - hexaY[edgenum]));
+      USER_PRINTF(" %d %f: %f,%f", edgenum, offset, x, y);
+
+      write2D(x,y);
+
+    }
+  }
+
   void cone3D (uint16_t startX, uint16_t startY, uint16_t startZ, uint8_t nrOfRings) {
 
     openPin();
@@ -330,7 +357,7 @@ public:
     closePin();
   }
 
-  void plane3DFindNextPoint(Coordinate *point, Coordinate first, Coordinate last, uint8_t axis, bool clockWise) {
+  void plane3DFindNextPoint(Coord3D *point, Coord3D first, Coord3D last, uint8_t axis, bool clockWise) {
     if (axis == 0) {
       if (point->x != last.x) {
         point->x += point->x<=last.x?1:-1;
@@ -365,10 +392,10 @@ public:
     // USER_PRINTF("plane3DFindNextPoint %d %d %d %d \n", axis, point->x, point->y, point->z);
   }
 
-  void plane3D (Coordinate first, Coordinate last, bool clockWise) {
+  void plane3D (Coord3D first, Coord3D last, bool clockWise) {
     openPin();
     bool cont = true;
-    Coordinate point = first;
+    Coord3D point = first;
 
     write3D(point.x*10, point.y*10, point.z*10);
 
@@ -504,40 +531,71 @@ public:
 
   void setup() {
     SysModule::setup();
-    USER_PRINT_FUNCTION("%s %s\n", __PRETTY_FUNCTION__, name);
 
-    parentVar = ui->initModule(parentVar, name);
+    parentVar = ui->initUserMod(parentVar, name);
+    if (parentVar["o"] > -1000) parentVar["o"] = -1200; //set default order. Don't use auto generated order as order can be changed in the ui (WIP)
 
-    ui->initSelect(parentVar, "fixtureGen", 0, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "label", "Fixture");
-      web->addResponse(var["id"], "comment", "Type of fixture");
-      JsonArray select = web->addResponseA(var["id"], "data");
-      select.add("1DSpiral"); //0
-      select.add("2DMatrix"); //1
-      select.add("2DRing"); //2
-      select.add("2DRings241"); //3
-      select.add("2DCloud"); //4
-      select.add("2DWall"); //5
-      select.add("2DWheel"); //6
-      select.add("3DCone"); //7
-      select.add("3DSideCube"); //8
-      select.add("3DCube"); //9
-      select.add("3DGlobe WIP"); //10
-      select.add("3DGeodesicDome WIP"); //11
-    }, [this](JsonObject var, uint8_t) { //chFun
-      fixtureGenChFun(var);
-    }); //fixtureGen
+    ui->initSelect(parentVar, "fixtureGen", 0, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    
+      case f_UIFun: {
+        ui->setLabel(var, "Fixture");
+        ui->setComment(var, "Type of fixture");
+        JsonArray options = ui->setOptions(var);
+        options.add("1DSpiral"); //0
+        options.add("2DMatrix"); //1
+        options.add("2DRing"); //2
+        options.add("2DRings241"); //3
+        options.add("2DCloud"); //4
+        options.add("2DWall"); //5
+        options.add("2DWheel"); //6
+        options.add("2DHexagon"); //7
+        options.add("3DCone"); //8
+        options.add("3DSideCube"); //9
+        options.add("3DCube"); //10
+        options.add("3DGlobe WIP"); //11
+        options.add("3DGeodesicDome WIP"); //12
+        return true;
+      }
+      case f_ChangeFun:
+        fixtureGenChFun(var);
 
-    ui->initText(parentVar, "pinList", "16", 32, false, [](JsonObject var) { //uiFun
-      web->addResponse(var["id"], "comment", "One or more e.g. 12,13,14");
-    });
+        web->addResponse("details", "var", var);
+        return true;
 
-    ui->initButton(parentVar, "generate", nullptr, false, [](JsonObject var) { //uiFun
-    }, [this](JsonObject var, uint8_t) { //chFun
-      generateChFun(var);
-    });
+      default: return false; 
+    }}); //fixtureGen
 
-    USER_PRINT_FUNCTION("%s %s %s\n", __PRETTY_FUNCTION__, name, success?"success":"failed");
+	// gpio2 seems to be a safe choice on all esp32 variants
+    ui->initText(parentVar, "pinList", "2", 32, false, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_UIFun:
+        ui->setComment(var, "One or more e.g. 12,13,14");
+        return true;
+#if 0		// @ewowi did not get this to work
+      case f_ValueFun:
+        #if CONFIG_IDF_TARGET_ESP32 && (defined(BOARD_HAS_PSRAM) || defined(ARDUINO_ESP32_PICO)) // 
+          ui->setValue(var, "2");  // gpio16 is reserved on pico and on esp32 with PSRAM
+        #elif CONFIG_IDF_TARGET_ESP32S3
+          ui->setValue(var, "21");  // gpio21 = builtin neopixel on some -S3 boards
+        #elif CONFIG_IDF_TARGET_ESP32C3
+          ui->setValue(var, "10");  // gpio10 = builtin neopixel on some -C3 boards
+        #else
+          ui->setValue(var, "16");  // default on universal shield (classic esp32, or esp32-S2)
+        #endif
+        return true;
+#endif
+      default: return false;
+    }});
+
+    ui->initButton(parentVar, "generate", false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+      case f_ChangeFun:
+        generateChFun(var);
+
+        //reload fixture select
+        ui->callVarFun("fixture", UINT8_MAX, f_UIFun);
+        return true;
+      default: return false;
+    }});
+
   }
 
   void loop() {
@@ -553,6 +611,7 @@ public:
     f_2DCloud,
     f_2DWall,
     f_2DWheel,
+    f_2DHexagon,
     f_3DCone,
     f_3DSideCube,
     f_3DCube,
@@ -563,15 +622,15 @@ public:
 
   //generate dynamic html for fixture controls
   void fixtureGenChFun(JsonObject var) {
-    JsonObject parentVar = mdl->findVar(var["id"]);
-    parentVar.remove("n"); //tbd: we should also remove the uiFun and chFun !!
+    JsonObject parentVar = mdl->findVar(var["id"]); //local parentVar
+    parentVar.remove("n"); //tbd: we should also remove the varFun !!
     uint8_t value = var["value"];
     
     if (value == f_1DSpiral) {
-      ui->initNumber(parentVar, "ledCount", 64, 1, NUM_LEDS_Preview);
+      ui->initNumber(parentVar, "ledCount", 64, 1, NUM_LEDS_Max);
     }
     else if (value == f_2DRing) {
-      ui->initNumber(parentVar, "ledCount", 24, 1, NUM_LEDS_Preview);
+      ui->initNumber(parentVar, "ledCount", 24, 1, NUM_LEDS_Max);
     }
     else if (value == f_2DRings241) {
       ui->initCheckBox(parentVar, "in2out", true);
@@ -585,22 +644,33 @@ public:
       ui->initNumber(parentVar, "nrOfRings", 24, 1, 360);
     }
     else if (value == f_2DMatrix) {
+      ui->initNumber(parentVar, "panels", 1, 1, 255);
+
       ui->initNumber(parentVar, "width", 8, 1, 255);
 
       ui->initNumber(parentVar, "height", 8, 1, 255);
 
-      ui->initSelect(parentVar, "firstLedX", 0, false, [](JsonObject var) { //uiFun
-        // web->addResponse(var["id"], "label", "fixture generator");
-        JsonArray select = web->addResponseA(var["id"], "data");
-        select.add("Left"); //0
-        select.add("Right"); //1
-      });
-      ui->initSelect(parentVar, "firstLedY", 0, false, [](JsonObject var) { //uiFun
-        // web->addResponse(var["id"], "label", "fixture generator");
-        JsonArray select = web->addResponseA(var["id"], "data");
-        select.add("Top"); //0
-        select.add("Bottom"); //1
-      });
+      ui->initSelect(parentVar, "firstLedX", 0, false, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+        case f_UIFun: {
+          ui->setComment(var, "WIP");
+          JsonArray options = ui->setOptions(var);
+          options.add("Left"); //0
+          options.add("Right"); //1
+          return true;
+        }
+        default: return false;
+      }});
+
+      ui->initSelect(parentVar, "firstLedY", 0, false, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+        case f_UIFun: {
+          ui->setComment(var, "WIP");
+          JsonArray options = ui->setOptions(var);
+          options.add("Top"); //0
+          options.add("Bottom"); //1
+          return true;
+        }
+        default: return false;
+      }});
 
       ui->initCheckBox(parentVar, "serpentine");
     }
@@ -616,15 +686,6 @@ public:
     else if (value == f_3DGlobe) {
       ui->initNumber(parentVar, "width", 24, 1, 16);
     }
-
-    JsonDocument *responseDoc = web->getResponseDoc();
-    responseDoc->clear(); //needed for deserializeJson?
-    JsonObject responseObject = responseDoc->to<JsonObject>();
-
-    responseObject["details"] = parentVar;
-
-    print->printJson("parentVar", responseObject);
-    web->sendDataWs(responseObject); //always send, also when no children, to remove them from ui
 
   }
 
@@ -645,12 +706,13 @@ public:
       genFix.closeHeader();
       
     } else if (fix == f_2DMatrix) {
+      uint16_t panels = mdl->getValue("panels");
       uint16_t width = mdl->getValue("width");
       uint16_t height = mdl->getValue("height");
 
-      genFix.openHeader("2DMatrix%d%d", width, height);
+      genFix.openHeader("2DMatrix%dx%d%d", panels, width, height);
 
-      genFix.matrix2D(0, 0, width, height);
+      genFix.matrix2D(0, 0, panels, width, height);
 
       genFix.closeHeader();
 
@@ -684,9 +746,9 @@ public:
 
       genFix.rings241(0, 0);
 
-      genFix.matrix2D(190, 0, 8, 8);
+      genFix.matrix2D(190, 0, 1, 8, 8);
 
-      genFix.matrix2D(0, 190, 50, 4);
+      genFix.matrix2D(0, 190, 1, 50, 6);
 
       genFix.ring2D(190, 85, 48);
 
@@ -701,6 +763,26 @@ public:
       genFix.openHeader("2DWheel%d_%d", nrOfSpokes, ledsPerSpoke);
 
       genFix.wheel2D(0, 0, nrOfSpokes, ledsPerSpoke);
+
+      genFix.closeHeader();
+    }
+    else if (fix == f_2DHexagon) {
+
+      genFix.openHeader("2DHexagon");
+
+      genFix.openPin();
+
+      genFix.hexagon2D(50, 50, 36, 40);
+      genFix.hexagon2D(100, 75, 36, 40);
+      genFix.hexagon2D(150, 50, 36, 40);
+      genFix.hexagon2D(200, 75, 36, 40);
+      genFix.hexagon2D(250, 100, 36, 40);
+      genFix.hexagon2D(300, 75, 36, 40);
+      genFix.hexagon2D(350, 50, 36, 40);
+      genFix.hexagon2D(100, 125, 36, 40);
+      genFix.hexagon2D(250, 150, 36, 40);
+
+      genFix.closePin();
 
       genFix.closeHeader();
 
@@ -725,11 +807,12 @@ public:
       
       genFix.openHeader("3DSideCube%d%d", length, sides);
 
+      //use (uint16_t)(length+1) to surpress warning warning: narrowing conversion of '(((int)length) + 1)' from 'int' to 'uint16_t' {aka 'short unsigned int'} inside { } [-Wnarrowing]
       genFix.plane3D({1, 1, 0},   {length, length, 0}, true); // front (z=0, first x then y)
-      genFix.plane3D({length, length+1, length}, {1, length+1, 1}, false); // bottom (y=length+1, first x, then z)
-      genFix.plane3D({length+1, 1, 1}, {length+1, length, length}, false); // right (x=length + 1, first z, then y)
+      genFix.plane3D({length, (uint16_t)(length+1), length}, {1, (uint16_t)(length+1), 1}, false); // bottom (y=length+1, first x, then z)
+      genFix.plane3D({(uint16_t)(length+1), 1, 1}, {(uint16_t)(length+1), length, length}, false); // right (x=length + 1, first z, then y)
       genFix.plane3D({0, length, length}, {0, 1, 1}, true); // left (x=0, first y, then z)
-      genFix.plane3D({length, 1, length+1}, {1, length, length+1}, true); // back (z = length+1, first x, then y)
+      genFix.plane3D({length, 1, (uint16_t)(length+1)}, {1, length, (uint16_t)(length+1)}, true); // back (z = length+1, first x, then y)
       genFix.plane3D({1, 0, length}, {length, 0, 1}, true); // top (y=0, first x, then z)
 
       // genFix.sideCube3D (0, 0, 0, length, sides);  
@@ -767,9 +850,6 @@ public:
     }
 
     files->filesChange();
-
-    //reload fixture select
-    ui->processUiFun("fixture");
   }
 
   // File openFile(const char * name) {
