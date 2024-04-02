@@ -1,10 +1,10 @@
 /*
    @title     StarMod
-   @file      SysJsonRDWS.h
-   @date      20240114
+   @file      SysStarModJson.h
+   @date      20240228
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2024 Github StarMod Commit Authors
+   @Copyright © 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
@@ -12,19 +12,19 @@
 //Lazy Json Read Deserialize Write Serialize (write / serialize not implemented yet)
 //ArduinoJson won't work on very large fixture.json, this does
 //only support what is currently needed: read / deserialize uint8/16/char var elements (arrays not yet)
-class JsonRDWS {
+class StarModJson {
 
   public:
 
-  JsonRDWS(const char * path, const char * mode = "r") {
-    USER_PRINTF("JsonRDWS constructing %s %s\n", path, mode);
+  StarModJson(const char * path, const char * mode = "r") {
+    USER_PRINTF("StarModJson constructing %s %s\n", path, mode);
     f = files->open(path, mode);
     if (!f)
-      USER_PRINTF("JsonRDWS open %s for %s failed", path, mode);
+      USER_PRINTF("StarModJson open %s for %s failed", path, mode);
   }
 
-  ~JsonRDWS() {
-    USER_PRINTF("JsonRDWS destructing\n");
+  ~StarModJson() {
+    USER_PRINTF("StarModJson destructing\n");
     f.close();
   }
 
@@ -36,18 +36,18 @@ class JsonRDWS {
   void writeJsonDocToFile(JsonDocument* dest) {
     writeJsonVariantToFile(dest->as<JsonVariant>());
     f.close();
-    files->filesChange();
+    files->filesChanged = true;
   }
 
   //look for uint8 var
-  void lookFor(const char * id, uint8_t * value) {
-    // const char *p = (const char*)&value; //pointer trick
-    uint8List.push_back(value);
-    addToVars(id, "uint8", uint8List.size()-1);
-  }
+  // void lookFor(const char * id, unsigned8 * value) {
+  //   // const char *p = (const char*)&value; //pointer trick
+  //   uint8List.push_back(value);
+  //   addToVars(id, "uint8", uint8List.size()-1);
+  // }
 
   //look for uint16 var
-  void lookFor(const char * id, uint16_t * value) {
+  void lookFor(const char * id, unsigned16 * value) {
     uint16List.push_back(value);
     addToVars(id, "uint16", uint16List.size()-1);
   }
@@ -59,7 +59,7 @@ class JsonRDWS {
   }
 
   //look for array of integers
-  void lookFor(const char * id, std::function<void(std::vector<uint16_t>)> fun) {
+  void lookFor(const char * id, std::function<void(std::vector<unsigned16>)> fun) {
     funList.push_back(fun);
     addToVars(id, "fun", funList.size()-1);
   }
@@ -71,9 +71,9 @@ class JsonRDWS {
     while (f.available() && (!foundAll || !lazy))
       next();
     if (foundAll)
-      USER_PRINTF("JsonRDWS found all what it was looking for %d >= %d\n", foundCounter, varDetails.size());
+      USER_PRINTF("StarModJson found all what it was looking for %d >= %d\n", foundCounter, varDetails.size());
     else
-      USER_PRINTF("JsonRDWS Not all vars looked for where found %d < %d\n", foundCounter, varDetails.size());
+      USER_PRINTF("StarModJson Not all vars looked for where found %d < %d\n", foundCounter, varDetails.size());
     f.close();
     return foundAll;
   }
@@ -86,15 +86,15 @@ private:
   };
 
   File f;
-  uint8_t character; //the last character parsed
+  byte character; //the last character parsed
   std::vector<VarDetails> varDetails; //details of vars looking for
-  std::vector<uint8_t *> uint8List; //pointer of uint8 to assign found values to (index of list stored in varDetails)
-  std::vector<uint16_t *> uint16List; //same for uint16
+  // std::vector<unsigned8 *> uint8List; //pointer of uint8 to assign found values to (index of list stored in varDetails)
+  std::vector<unsigned16 *> uint16List; //same for uint16
   std::vector<char *> charList; //same for char
-  std::vector<std::function<void(std::vector<uint16_t>)>> funList; //same for function calls
+  std::vector<std::function<void(std::vector<unsigned16>)>> funList; //same for function calls
   std::vector<String> varStack; //objects and arrays store their names in a stack
   bool collectNumbers = false; //array can ask to store all numbers found in array (now used for x,y,z coordinates)
-  std::vector<uint16_t> uint16CollectList; //collected numbers
+  std::vector<unsigned16> uint16CollectList; //collected numbers
   char lastVarId[128] = ""; //last found var id in json
   char beforeLastVarId[128] = ""; //last found var id in json
   size_t foundCounter = 0; //count how many of the id's to lookFor have been actually found
@@ -221,8 +221,8 @@ private:
     for (std::vector<VarDetails>::iterator vd=varDetails.begin(); vd!=varDetails.end(); ++vd) {
       // USER_PRINTF("check %s %s %s\n", vd->id, varId, value);
       if (strcmp(vd->id, varId)==0) {
-        // USER_PRINTF("JsonRDWS found %s:%s %d %s %d %d\n", varId, vd->type, vd->index, value?value:"", uint16CollectList.size(), funList.size());
-        if (strcmp(vd->type, "uint8") ==0 && value) *uint8List[vd->index] = atoi(value);
+        // USER_PRINTF("StarModJson found %s:%s %d %s %d %d\n", varId, vd->type, vd->index, value?value:"", uint16CollectList.size(), funList.size());
+        // if (strcmp(vd->type, "uint8") ==0 && value) *uint8List[vd->index] = atoi(value);
         if (strcmp(vd->type, "uint16") ==0 && value) *uint16List[vd->index] = atoi(value);
         if (strcmp(vd->type, "char") ==0 && value) strncpy(charList[vd->index], value, 31); //assuming size 32-1 here
         if (strcmp(vd->type, "fun") ==0) funList[vd->index](uint16CollectList); //call for every found item (no value check)
@@ -278,7 +278,7 @@ private:
       f.print("null");      
     }
     else
-      USER_PRINTF("dev JsonRDWS write %s not supported\n", variant.as<String>().c_str());
+      USER_PRINTF("dev StarModJson write %s not supported\n", variant.as<String>().c_str());
   }
 
 };

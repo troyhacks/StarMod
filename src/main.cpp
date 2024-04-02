@@ -4,7 +4,7 @@
    @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2024 Github StarMod Commit Authors
+   @Copyright © 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
@@ -12,6 +12,10 @@
 // remove latest commit
 // git reset --hard HEAD^
 // git push origin -f
+
+#warning ******************************************************************************************************************************
+#warning ********** STARMOD IS LICENSED UNDER GPL-V3. BY INSTALLING STARMOD YOU IMPLICITLY ACCEPT THE TERMS AND CONDITIONS  ********
+#warning ******************************************************************************************************************************
 
 #include "SysModule.h"
 #include "SysModules.h"
@@ -25,25 +29,44 @@
 #include "Sys/SysModPins.h"
 #include "User/UserModInstances.h"
 #include "User/UserModMDNS.h"
+SysModules *mdls;
+SysModPrint *print;
+SysModWeb *web;
+SysModUI *ui;
+SysModSystem *sys;
+SysModFiles *files;
+SysModModel *mdl;
+SysModNetwork *net;
+SysModPins *pins;
+UserModInstances *instances;
+UserModMDNS *mdns;
 #ifdef STARMOD_APPMOD_LEDS
-  #include "App/AppModLeds.h"
-  #include "App/AppModFixture.h"
-  #include "App/AppModFixtureGen.h"
+  #include "App/LedModEffects.h"
+  #include "App/LedModFixture.h"
+  #include "App/LedModFixtureGen.h"
+  LedModFixture *fix;
+  LedModFixtureGen *lfg;
+  LedModEffects *eff;
   #ifdef STARMOD_USERMOD_ARTNET
     #include "User/UserModArtNet.h"
+    UserModArtNet *artnetmod;
   #endif
   #ifdef STARMOD_USERMOD_DDP
     #include "User/UserModDDP.h"
+    UserModDDP *ddpmod;
   #endif
 #endif
 #ifdef STARMOD_USERMOD_E131
   #include "User/UserModE131.h"
+  UserModE131 *e131mod;
 #endif
 #ifdef STARMOD_USERMOD_HA
   #include "User/UserModHA.h"
+  UserModHA *hamod;
 #endif
 #ifdef STARMOD_USERMOD_WLEDAUDIO
   #include "User/UserModWLEDAudio.h"
+  UserModWLEDAudio *wledAudioMod;
 #endif
 
 //setup all modules
@@ -64,9 +87,9 @@ void setup() {
   instances = new UserModInstances();
   mdns = new UserModMDNS();
   #ifdef STARMOD_APPMOD_LEDS
-    lds = new AppModLeds();
-    fix = new AppModFixture();
-    lfg = new AppModFixtureGen();
+    eff= new LedModEffects();
+    fix = new LedModFixture();
+    lfg = new LedModFixtureGen();
     #ifdef STARMOD_USERMOD_ARTNET
       artnetmod = new UserModArtNet();
     #endif
@@ -84,11 +107,12 @@ void setup() {
     wledAudioMod = new UserModWLEDAudio();
   #endif
 
-  //Reorder with care! If changed make sure mdlEnabled.chFun executes var["value"].to<JsonArray>(); and saveModel! 
+  //Reorder with care! this is the order in which setup and loop is executed
+  //If changed make sure mdlEnabled.chFun executes var["value"].to<JsonArray>(); and saveModel! 
   //Default: add below, not in between
   #ifdef STARMOD_APPMOD_LEDS
     mdls->add(fix);
-    mdls->add(lds);
+    mdls->add(eff);
     mdls->add(lfg);
   #endif
   mdls->add(files);
@@ -128,8 +152,4 @@ void setup() {
 //loop all modules
 void loop() {
   mdls->loop();
-
-  // static bool onoff = false;
-  // onoff = !onoff;
-  // digitalWrite(LED_BUILTIN, onoff? HIGH:LOW);
 }

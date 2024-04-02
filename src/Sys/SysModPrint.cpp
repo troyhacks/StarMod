@@ -4,7 +4,7 @@
    @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2024 Github StarMod Commit Authors
+   @Copyright © 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
@@ -14,7 +14,7 @@
 #include "SysModUI.h"
 #include "SysModModel.h"
 #include "SysModWeb.h"
-#include "esp32Tools.h"
+#include "SysModSystem.h"
 
 SysModPrint::SysModPrint() :SysModule("Print") {
 
@@ -42,9 +42,9 @@ SysModPrint::SysModPrint() :SysModule("Print") {
   delay(3000); // this extra delay avoids repeating disconnects on -s2 "Disconnected (ClearCommError failed"
   Serial.println("   **** COMMODORE BASIC V2 ****   ");
 #endif
-  if (!sysTools_normal_startup() && Serial) { // only print if Serial is connected, and startup was not normal
+  if (!sys->sysTools_normal_startup() && Serial) { // only print if Serial is connected, and startup was not normal
     Serial.print("\nWARNING - possible crash: ");
-    Serial.println(sysTools_getRestartReason());
+    Serial.println(sys->sysTools_getRestartReason());
     Serial.println("");
   }
   Serial.println("Ready.\n");
@@ -54,10 +54,9 @@ SysModPrint::SysModPrint() :SysModule("Print") {
 void SysModPrint::setup() {
   SysModule::setup();
 
-  parentVar = ui->initSysMod(parentVar, name);
-  if (parentVar["o"] > -1000) parentVar["o"] = -2300; //set default order. Don't use auto generated order as order can be changed in the ui (WIP)
+  parentVar = ui->initSysMod(parentVar, name, 2302);
 
-  ui->initSelect(parentVar, "pOut", 1, false, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  ui->initSelect(parentVar, "pOut", 1, false, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_UIFun:
     {
       ui->setLabel(var, "Output");
@@ -74,7 +73,7 @@ void SysModPrint::setup() {
     default: return false;
   }});
 
-  ui->initTextArea(parentVar, "log", "WIP", true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  ui->initTextArea(parentVar, "log", "WIP", true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_UIFun:
       ui->setComment(var, "Show the printed log");
       return true;
@@ -94,7 +93,7 @@ size_t SysModPrint::print(const char * format, ...) {
 
 
   //tbd: print to UI (crashes because of recursive calls to print in setUIValueV...
-  // uint8_t pOut = mdl->getValue("pOut");
+  // unsigned8 pOut = mdl->getValue("pOut");
   // if (pOut == 2) {
     // Serial.println(format);
     // char value[1024];

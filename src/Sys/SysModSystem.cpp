@@ -4,7 +4,7 @@
    @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2024 Github StarMod Commit Authors
+   @Copyright © 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
@@ -14,19 +14,32 @@
 #include "SysModUI.h"
 #include "SysModWeb.h"
 #include "SysModModel.h"
-#include "esp32Tools.h"
 
 // #include <Esp.h>
-#include <rom/rtc.h>
+
+// get the right RTC.H for each MCU
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 0, 0)
+  #if CONFIG_IDF_TARGET_ESP32S2
+    #include <esp32s2/rom/rtc.h>
+  #elif CONFIG_IDF_TARGET_ESP32C3
+    #include <esp32c3/rom/rtc.h>
+  #elif CONFIG_IDF_TARGET_ESP32S3
+    #include <esp32s3/rom/rtc.h>
+  #elif CONFIG_IDF_TARGET_ESP32 // ESP32/PICO-D4
+    #include <esp32/rom/rtc.h>
+  #endif
+#else // ESP32 Before IDF 4.0
+  #include <rom/rtc.h>
+#endif
 
 SysModSystem::SysModSystem() :SysModule("System") {};
 
 void SysModSystem::setup() {
   SysModule::setup();
-  parentVar = ui->initSysMod(parentVar, name);
-  if (parentVar["o"] > -1000) parentVar["o"] = -2100; //set default order. Don't use auto generated order as order can be changed in the ui (WIP)
+  parentVar = ui->initSysMod(parentVar, name, 2000);
+  parentVar["s"] = true; //setup
 
-  ui->initText(parentVar, "serverName", "StarMod", 32, false, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  ui->initText(parentVar, "instanceName", "StarMod", 32, false, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_UIFun:
       ui->setLabel(var, "Name");
       ui->setComment(var, "Instance name");
@@ -34,16 +47,16 @@ void SysModSystem::setup() {
     default: return false;
   }});
 
-  ui->initText(parentVar, "upTime", nullptr, 16, true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  ui->initText(parentVar, "upTime", nullptr, 16, true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_UIFun:
       ui->setComment(var, "Uptime of board");
       return true;
     default: return false;
   }});
 
-  ui->initButton(parentVar, "reboot", false, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  ui->initButton(parentVar, "reboot", false, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_ChangeFun:
-      web->ws->closeAll(1012);
+      web->ws.closeAll(1012);
 
       // mdls->reboot(); //not working yet
       // long dly = millis();
@@ -61,7 +74,7 @@ void SysModSystem::setup() {
   print->fFormat(chipInfo, sizeof(chipInfo)-1, "%s %s c#:%d %d mHz f:%d KB %d mHz %d", ESP.getChipModel(), ESP.getSdkVersion(), ESP.getChipCores(), ESP.getCpuFreqMHz(), ESP.getFlashChipSize()/1024, ESP.getFlashChipSpeed()/1000000, ESP.getFlashChipMode());
   ui->initText(parentVar, "chip", chipInfo, 16, true);
 
-  ui->initProgress(parentVar, "heap", UINT16_MAX, 0, ESP.getHeapSize()/1000, true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  ui->initProgress(parentVar, "heap", UINT16_MAX, 0, ESP.getHeapSize()/1000, true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_ValueFun:
       mdl->setValue(var, (ESP.getHeapSize()-ESP.getFreeHeap()) / 1000);
       return true;
@@ -73,7 +86,7 @@ void SysModSystem::setup() {
   }});
 
   if (psramFound()) {
-    ui->initProgress(parentVar, "psram", UINT16_MAX, 0, ESP.getPsramSize()/1000, true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    ui->initProgress(parentVar, "psram", UINT16_MAX, 0, ESP.getPsramSize()/1000, true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
       case f_ValueFun:
         mdl->setValue(var, (ESP.getPsramSize()-ESP.getFreePsram()) / 1000);
         return true;
@@ -85,17 +98,33 @@ void SysModSystem::setup() {
     }});
   }
 
-  ui->initProgress(parentVar, "stack", UINT16_MAX, 0, 4096, true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  ui->initProgress(parentVar, "mainStack", UINT16_MAX, 0, getArduinoLoopTaskStackSize(), true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_ValueFun:
-      mdl->setValue(var, uxTaskGetStackHighWaterMark(NULL));
+      mdl->setValue(var, sysTools_get_arduino_maxStackUsage());
+      return true;
+    case f_UIFun:
+      ui->setLabel(var, "Main stack");
       return true;
     case f_ChangeFun:
-      web->addResponseV(var["id"], "comment", "%d / 4096 B", uxTaskGetStackHighWaterMark(NULL));
+      web->addResponseV(var["id"], "comment", "%d of %d B", sysTools_get_arduino_maxStackUsage(), getArduinoLoopTaskStackSize());
       return true;
     default: return false;
   }});
 
-  ui->initSelect(parentVar, "reset0", (int)rtc_get_reset_reason(0), true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  ui->initProgress(parentVar, "tcpStack", UINT16_MAX, 0, CONFIG_ASYNC_TCP_TASK_STACK_SIZE, true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+    case f_ValueFun:
+      mdl->setValue(var, sysTools_get_webserver_maxStackUsage());
+      return true;
+    case f_UIFun:
+      ui->setLabel(var, "TCP stack");
+      return true;
+    case f_ChangeFun:
+      web->addResponseV(var["id"], "comment", "%d of %d B", sysTools_get_webserver_maxStackUsage(), CONFIG_ASYNC_TCP_TASK_STACK_SIZE);
+      return true;
+    default: return false;
+  }});
+
+  ui->initSelect(parentVar, "reset0", (int)rtc_get_reset_reason(0), true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_UIFun:
       ui->setLabel(var, "Reset 0");
       ui->setComment(var, "Reason Core 0");
@@ -105,7 +134,7 @@ void SysModSystem::setup() {
   }});
 
   if (ESP.getChipCores() > 1)
-    ui->initSelect(parentVar, "reset1", (int)rtc_get_reset_reason(1), true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    ui->initSelect(parentVar, "reset1", (int)rtc_get_reset_reason(1), true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
       case f_UIFun:
         ui->setLabel(var, "Reset 1");
         ui->setComment(var, "Reason Core 1");
@@ -114,7 +143,7 @@ void SysModSystem::setup() {
       default: return false;
     }});
 
-  ui->initSelect(parentVar, "restartReason", (int)esp_reset_reason(), true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  ui->initSelect(parentVar, "restartReason", (int)esp_reset_reason(), true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_UIFun:
       ui->setLabel(var, "Restart");
       ui->setComment(var, "Reason restart");
@@ -138,8 +167,14 @@ void SysModSystem::setup() {
   // ui->initText(parentVar, "date", __DATE__, 16, true);
   // ui->initText(parentVar, "time", __TIME__, 16, true);
 
+  ui->initFile(parentVar, "update", nullptr, UINT16_MAX, false, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+    case f_UIFun:
+      ui->setLabel(var, "OTA Update");
+      return true;
+    default: return false;
+  }});
 
-  // static char msgbuf[32];
+  // char msgbuf[32];
   // snprintf(msgbuf, sizeof(msgbuf)-1, "%s rev.%d", ESP.getChipModel(), ESP.getChipRevision());
   // ui->initText(parentVar, "e32model")] = msgbuf;
   // ui->initText(parentVar, "e32cores")] = ESP.getChipCores();
@@ -170,7 +205,8 @@ void SysModSystem::loop1s() {
 }
 void SysModSystem::loop10s() {
   ui->callVarFun(mdl->findVar("heap"));
-  ui->callVarFun(mdl->findVar("stack"));
+  ui->callVarFun(mdl->findVar("mainStack"));
+  ui->callVarFun(mdl->findVar("tcpStack"));
 
   if (psramFound()) {
     ui->callVarFun(mdl->findVar("psram"));
@@ -221,3 +257,164 @@ void SysModSystem::addRestartReasonsSelect(JsonArray options) {
   options.add(sysTools_restart2String( 9)); // //!< Brownout reset (software or hardware)
   options.add(sysTools_restart2String(10)); //     //!< Reset over SDIO
 }
+
+//from esptools.h - public
+
+// check if estart was "normal"
+bool SysModSystem::sysTools_normal_startup() {
+  esp_reset_reason_t restartCode = getRestartReason();
+  if ((restartCode == ESP_RST_POWERON) || (restartCode == ESP_RST_SW)) return true;  // poweron or esp_restart()
+  return false;
+}
+
+// RESTART reason as long string
+String SysModSystem::sysTools_getRestartReason() {
+  esp_reset_reason_t restartCode = getRestartReason();
+  String reasonText = restartCode2InfoLong(restartCode);
+  String longText = String("(code ") + String((int)restartCode) + String( ") ") + reasonText;
+
+  int core0code = getCoreResetReason(0);
+  int core1code = getCoreResetReason(1);
+  longText = longText + ". Core#0 (code " + String(core0code) + ") " + resetCode2Info(core0code);
+  if (core1code > 0) 
+    longText = longText + "; Core#1 (code " + String(core1code) + ") " + resetCode2Info(core1code);
+
+  longText = longText + ".";
+  return longText;
+}
+
+// helper for SysModSystem::addRestartReasonsSelect. Returns "(#) ReasonText"
+String SysModSystem::sysTools_restart2String(int reasoncode) {
+  esp_reset_reason_t restartCode = esp_reset_reason_t(reasoncode); // its a trick, not a sony ;-)
+  String longText = String("(") + String(reasoncode) + String( ") ") + restartCode2Info(restartCode);
+  return longText;
+}
+
+// helper for SysModSystem::addResetReasonsSelect. Returns "CoreResetReasonText (#)"
+String SysModSystem::sysTools_reset2String(int resetCode) {
+  String longText = resetCode2Info(resetCode) + String(" (") + String(resetCode) + String(")");
+  return longText;
+}
+
+int SysModSystem::sysTools_get_arduino_maxStackUsage(void) {
+  char * loop_taskname = pcTaskGetTaskName(loop_taskHandle);    // ask for name of the known task (to make sure we are still looking at the right one)
+
+  if ((loop_taskHandle == NULL) || (loop_taskname == NULL) || (strncmp(loop_taskname, "loopTask", 8) != 0)) {
+    loop_taskHandle = xTaskGetHandle("loopTask");              // need to look for the task by name. FreeRTOS docs say this is very slow, so we store the result for next time
+  }
+
+  if (loop_taskHandle != NULL) return uxTaskGetStackHighWaterMark(loop_taskHandle); // got it !!
+  else return -1;
+}
+
+int SysModSystem::sysTools_get_webserver_maxStackUsage(void) {
+  char * tcp_taskname = pcTaskGetTaskName(tcp_taskHandle);     // ask for name of the known task (to make sure we are still looking at the right one)
+
+  if ((tcp_taskHandle == NULL) || (tcp_taskname == NULL) || (strncmp(tcp_taskname, "async_tcp", 9) != 0)) {
+    tcp_taskHandle = xTaskGetHandle("async_tcp");              // need to look for the task by name. FreeRTOS docs say this is very slow, so we store the result for next time
+  }
+
+  if (tcp_taskHandle != NULL) return uxTaskGetStackHighWaterMark(tcp_taskHandle); // got it !!
+  else return -1;
+}
+
+
+//from esptools.h - private
+
+// helper fuctions
+int SysModSystem::getCoreResetReason(int core) {
+  if (core >= ESP.getChipCores()) return 0;
+  return((int)rtc_get_reset_reason(core));
+}
+
+String SysModSystem::resetCode2Info(int reason) {
+  switch(reason) {
+
+    case 1 : //  1 =  Vbat power on reset
+      return "power-on"; break;
+    case 2 : // 2 = this code is not defined on ESP32
+      return "exception"; break;
+    case 3 : // 3 = Software reset digital core
+      return "SW reset"; break;
+    case 12: //12 = Software reset CPU
+      return "SW restart"; break;
+    case 5 : // 5 = Deep Sleep wakeup reset digital core
+      return "wakeup"; break;
+    case 14:  //14 = for APP CPU, reset by PRO CPU
+      return "restart"; break;
+    case 15: //15 = Reset when the vdd voltage is not stable (brownout)
+      return "brown-out"; break;
+
+    // watchdog resets
+    case 4 : // 4 = Legacy watch dog reset digital core
+    case 6 : // 6 = Reset by SLC module, reset digital core
+    case 7 : // 7 = Timer Group0 Watch dog reset digital core
+    case 8 : // 8 = Timer Group1 Watch dog reset digital core
+    case 9 : // 9 = RTC Watch dog Reset digital core
+    case 11: //11 = Time Group watchdog reset CPU
+    case 13: //13 = RTC Watch dog Reset CPU
+    case 16: //16 = RTC Watch dog reset digital core and rtc module
+    case 17: //17 = Time Group1 reset CPU
+      return "watchdog"; break;
+    case 18: //18 = super watchdog reset digital core and rtc module
+      return "super watchdog"; break;
+
+    // misc
+    case 10: // 10 = Instrusion tested to reset CPU
+      return "intrusion"; break;
+    case 19: //19 = glitch reset digital core and rtc module
+      return "glitch"; break;
+    case 20: //20 = efuse reset digital core
+      return "EFUSE reset"; break;
+    case 21: //21 = usb uart reset digital core
+      return "USB UART reset"; break;
+    case 22: //22 = usb jtag reset digital core
+    return "JTAG reset"; break;
+    case 23: //23 = power glitch reset digital core and rtc module
+      return "power glitch"; break;
+
+    // unknown reason code
+    case 0:
+      return "none"; break;
+    default: 
+      return "unknown"; break;
+  }
+}
+
+esp_reset_reason_t SysModSystem::getRestartReason() {
+  return(esp_reset_reason());
+}
+String SysModSystem::restartCode2InfoLong(esp_reset_reason_t reason) {
+    switch (reason) {
+      case ESP_RST_UNKNOWN:  return("Reset reason can not be determined"); break;
+      case ESP_RST_POWERON:  return("Restart due to power-on event"); break;
+      case ESP_RST_EXT:      return("Reset by external pin (not applicable for ESP32)"); break;
+      case ESP_RST_SW:       return("Software restart via esp_restart()"); break;
+      case ESP_RST_PANIC:    return("Software reset due to panic or unhandled exception (SW error)"); break;
+      case ESP_RST_INT_WDT:  return("Reset (software or hardware) due to interrupt watchdog"); break;
+      case ESP_RST_TASK_WDT: return("Reset due to task watchdog"); break;
+      case ESP_RST_WDT:      return("Reset due to other watchdogs"); break;
+      case ESP_RST_DEEPSLEEP:return("Restart after exiting deep sleep mode"); break;
+      case ESP_RST_BROWNOUT: return("Brownout Reset (software or hardware)"); break;
+      case ESP_RST_SDIO:     return("Reset over SDIO"); break;
+    }
+  return("unknown");
+}
+
+String SysModSystem::restartCode2Info(esp_reset_reason_t reason) {
+    switch (reason) {
+      case ESP_RST_UNKNOWN:  return("unknown reason"); break;
+      case ESP_RST_POWERON:  return("power-on event"); break;
+      case ESP_RST_EXT:      return("external pin reset"); break;
+      case ESP_RST_SW:       return("SW restart by esp_restart()"); break;
+      case ESP_RST_PANIC:    return("SW error - panic or exception"); break;
+      case ESP_RST_INT_WDT:  return("interrupt watchdog"); break;
+      case ESP_RST_TASK_WDT: return("task watchdog"); break;
+      case ESP_RST_WDT:      return("other watchdog"); break;
+      case ESP_RST_DEEPSLEEP:return("exit from deep sleep"); break;
+      case ESP_RST_BROWNOUT: return("Brownout Reset"); break;
+      case ESP_RST_SDIO:     return("Reset over SDIO"); break;
+    }
+  return("unknown");
+}
+

@@ -4,7 +4,7 @@
    @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2024 Github StarMod Commit Authors
+   @Copyright © 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
@@ -45,10 +45,9 @@ public:
   void setup() {
     SysModule::setup();
 
-    parentVar = ui->initUserMod(parentVar, name);
-    if (parentVar["o"] > -1000) parentVar["o"] = -3000; //set default order. Don't use auto generated order as order can be changed in the ui (WIP)
+    parentVar = ui->initUserMod(parentVar, name, 6000);
 
-    ui->initSelect(parentVar, "ddpInst", UINT16_MAX, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+    ui->initIP(parentVar, "ddpInst", UINT16_MAX, false, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     
       case f_UIFun: {
         ui->setLabel(var, "Instance");
@@ -57,14 +56,14 @@ public:
         JsonArray instanceObject = options.add<JsonArray>();
         instanceObject.add(0);
         instanceObject.add("no sync");
-        for (auto node=instances->instances.begin(); node!=instances->instances.end(); ++node) {
-          if (node->ip != WiFi.localIP()) {
-            char option[32] = { 0 };
-            strncpy(option, node->ip.toString().c_str(), sizeof(option)-1);
+        for (InstanceInfo &instance : instances->instances) {
+          if (instance.ip != WiFi.localIP()) {
+            char option[64] = { 0 };
+            strncpy(option, instance.name, sizeof(option)-1);
             strncat(option, " ", sizeof(option)-1);
-            strncat(option, node->name, sizeof(option)-1);
+            strncat(option, instance.ip.toString().c_str(), sizeof(option)-1);
             instanceObject = options.add<JsonArray>();
-            instanceObject.add(node->ip[3]);
+            instanceObject.add(instance.ip[3]);
             instanceObject.add(option);
           }
         }
@@ -85,19 +84,19 @@ public:
   void loop() {
     // SysModule::loop();
 
-    if(!SysModules::isConnected) return;
+    if(!mdls->isConnected) return;
 
     if(!targetIp) return;
 
-    if(!lds->newFrame) return;
+    if(!eff->newFrame) return;
 
     // calculate the number of UDP packets we need to send
     bool isRGBW = false;
 
-    const size_t channelCount = lds->fixture.nrOfLeds * (isRGBW? 4:3); // 1 channel for every R,G,B,(W?) value
+    const size_t channelCount = eff->fixture.nrOfLeds * (isRGBW? 4:3); // 1 channel for every R,G,B,(W?) value
     const size_t packetCount = ((channelCount-1) / DDP_CHANNELS_PER_PACKET) +1;
 
-    uint32_t channel = 0; 
+    stackUnsigned32 channel = 0; 
     size_t bufferOffset = 0;
 
     sequenceNumber++;
@@ -118,7 +117,7 @@ public:
       // the amount of data is AFTER the header in the current packet
       size_t packetSize = DDP_CHANNELS_PER_PACKET;
 
-      uint8_t flags = DDP_FLAGS1_VER1;
+      byte flags = DDP_FLAGS1_VER1;
       if (currentPacket == (packetCount - 1U)) {
         // last packet, set the push flag
         // TODO: determine if we want to send an empty push packet to each destination after sending the pixel data
@@ -142,8 +141,8 @@ public:
       /*8*/ddpUdp.write(0xFF & (packetSize >> 8));
       /*9*/ddpUdp.write(0xFF & (packetSize     ));
 
-      for (size_t i = 0; i < lds->fixture.nrOfLeds; i++) {
-        CRGB pixel = lds->fixture.ledsP[i];
+      for (size_t i = 0; i < eff->fixture.nrOfLeds; i++) {
+        CRGB pixel = eff->fixture.ledsP[i];
         ddpUdp.write(scale8(pixel.r, bri)); // R
         ddpUdp.write(scale8(pixel.g, bri)); // G
         ddpUdp.write(scale8(pixel.b, bri)); // B
@@ -163,4 +162,4 @@ public:
 
 };
 
-static UserModDDP *ddpmod;
+extern UserModDDP *ddpmod;

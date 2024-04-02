@@ -1,15 +1,16 @@
 /*
    @title     StarMod
    @file      SysModFiles.h
-   @date      20240114
+   @date      20240228
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2024 Github StarMod Commit Authors
+   @Copyright © 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
 
 #pragma once
+
 #include "SysModule.h"
 #include "LittleFS.h"
 
@@ -23,6 +24,7 @@ class SysModFiles: public SysModule {
 public:
 
   std::vector<FileDetails> fileList;
+  bool filesChanged = true; //init fileTbl;
 
   SysModFiles();
   void setup();
@@ -37,8 +39,6 @@ public:
 
   File open(const char * path, const char * mode, const bool create = false);
 
-  void filesChange();
-
   //get the file names and size in an array
   void dirToJson(JsonArray array, bool nameOnly = false, const char * filter = nullptr);
 
@@ -51,7 +51,7 @@ public:
 
   //write json into file
   //name is copied from WLED but better to call it readJsonFrom file
-  //candidate for deletion as taken over by JsonRDWS
+  //candidate for deletion as taken over by StarModJson
   // bool writeObjectToFile(const char* path, JsonDocument* dest);
 
   //remove files meeting filter condition, if no filter, all, if reverse then all but filter
@@ -59,9 +59,6 @@ public:
 
   bool readFile(const char * path);
 
-private:
-  static bool filesChanged;
-
 };
 
-static SysModFiles *files;
+extern SysModFiles *files;

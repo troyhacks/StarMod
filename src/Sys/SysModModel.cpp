@@ -1,10 +1,10 @@
 /*
    @title     StarMod
    @file      SysModModel.cpp
-   @date      20240114
+   @date      20240228
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2024 Github StarMod Commit Authors
+   @Copyright © 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
@@ -12,11 +12,8 @@
 #include "SysModModel.h"
 #include "SysModule.h"
 #include "SysModFiles.h"
-#include "SysJsonRDWS.h"
+#include "SysStarModJson.h"
 #include "SysModUI.h"
-
-JsonDocument * SysModModel::model = nullptr;
-JsonObject SysModModel::modelParentVar;
 
 SysModModel::SysModModel() :SysModule("Model") {
   model = new JsonDocument(&allocator);
@@ -35,10 +32,10 @@ SysModModel::SysModModel() :SysModule("Model") {
 void SysModModel::setup() {
   SysModule::setup();
 
-  parentVar = ui->initSysMod(parentVar, name);
-  if (parentVar["o"] > -1000) parentVar["o"] = -4000; //set default order. Don't use auto generated order as order can be changed in the ui (WIP)
+  parentVar = ui->initSysMod(parentVar, name, 4303);
+  parentVar["s"] = true; //setup
 
-  ui->initButton(parentVar, "saveModel", false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  ui->initButton(parentVar, "saveModel", false, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_UIFun:
       ui->setComment(var, "Write to model.json");
       return true;
@@ -48,7 +45,9 @@ void SysModModel::setup() {
     default: return false;
   }});
 
-  ui->initCheckBox(parentVar, "showObsolete", doShowObsolete, false, [this](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  #ifdef STARMOD_DEVMODE
+
+  ui->initCheckBox(parentVar, "showObsolete", doShowObsolete, false, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_UIFun:
       ui->setComment(var, "Show in UI (refresh)");
       return true;
@@ -58,18 +57,20 @@ void SysModModel::setup() {
     default: return false;
   }});
 
-  ui->initButton(parentVar, "deleteObsolete", false, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  ui->initButton(parentVar, "deleteObsolete", false, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_UIFun:
       ui->setLabel(var, "Delete obsolete variables");
       ui->setComment(var, "WIP");
       return true;
-    case f_ChangeFun:
-      model->to<JsonArray>(); //create
-      if (files->readObjectFromFile("/model.json", model)) {//not part of success...
-      }
-      return true;
+    // case f_ChangeFun:
+    //   model->to<JsonArray>(); //create
+    //   if (files->readObjectFromFile("/model.json", model)) {//not part of success...
+    //   }
+    //   return true;
     default: return false;
   }});
+
+  #endif //STARMOD_DEVMODE
 }
 
   void SysModModel::loop() {
@@ -87,9 +88,11 @@ void SysModModel::setup() {
 
     cleanUpModel(JsonObject(), false, true);//remove if var["o"] is negative (not cleanedUp) and remove ro values
 
-    JsonRDWS jrdws("/model.json", "w"); //open fileName for deserialize
-    jrdws.addExclusion("fun");
-    jrdws.writeJsonDocToFile(model);
+    StarModJson starModJson("/model.json", "w"); //open fileName for deserialize
+    starModJson.addExclusion("fun");
+    starModJson.addExclusion("dash");
+    starModJson.addExclusion("o");
+    starModJson.writeJsonDocToFile(model);
 
     // print->printJson("Write model", *model); //this shows the model before exclusion
 
@@ -103,7 +106,7 @@ void SysModModel::cleanUpModel(JsonObject parent, bool oPos, bool ro) {
   if (parent.isNull()) //no parent
     vars = model->as<JsonArray>();
   else
-    vars = varN(parent);
+    vars = varChildren(parent);
 
   for (JsonArray::iterator varV=vars.begin(); varV!=vars.end(); ++varV) {
   // for (JsonVariant varV : vars) {
@@ -131,15 +134,14 @@ void SysModModel::cleanUpModel(JsonObject parent, bool oPos, bool ro) {
       }
 
       //remove ro values (ro vars cannot be deleted as SM uses these vars)
-      // remove if var is ro or table of var is ro (ro table can have non ro vars e.g. instance table)
-      if (ro && ((parent["type"] == "table" && varRO(parent)) || varRO(var))) {// && !var["value"].isNull())
-      // if (ro && varRO(var)) {// && !var["value"].isNull())
+      // remove if var is ro or table is instance table (exception here, values don't need to be saved)
+      if (ro && (parent["id"] == "insTbl" || varRO(var))) {// && !var["value"].isNull())
         USER_PRINTF("remove ro value %s\n", varID(var));          
         var.remove("value");
       }
 
       //recursive call
-      if (!varN(var).isNull())
+      if (!varChildren(var).isNull())
         cleanUpModel(var, oPos, ro);
     } 
   }
@@ -202,11 +204,11 @@ void SysModModel::varToValues(JsonObject var, JsonArray row) {
     }
 }
 
-void SysModModel::callChangeFun(JsonObject var, uint8_t rowNr) {
+void SysModModel::callChangeFun(JsonObject var, unsigned8 rowNr) {
 
   //done here as ui cannot be used in SysModModel.h
-  if (var["stage"])
-    ui->stageVarChanged = true;
+  if (var["dash"])
+    ui->dashVarChanged = true;
 
   ui->callVarFun(var, rowNr, f_ChangeFun);
 

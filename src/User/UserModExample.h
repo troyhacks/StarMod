@@ -4,7 +4,7 @@
    @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2024 Github StarMod Commit Authors
+   @Copyright © 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
@@ -26,11 +26,11 @@ public:
   }
 
   void onOffChanged() {
-    if (SysModules::isConnected && isEnabled) {
+    if (mdls->isConnected && isEnabled) {
     } else {
     }
   }
 
 };
 
-static UserModExample *example;
+extern UserModExample *example;

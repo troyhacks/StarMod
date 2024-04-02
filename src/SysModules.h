@@ -4,7 +4,7 @@
    @date      20240114
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2024 Github StarMod Commit Authors
+   @Copyright © 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
@@ -14,8 +14,8 @@
 
 class SysModules {
 public:
-  static bool newConnection;// = false; //need to be static otherwise crash
-  static bool isConnected;// = false; //need to be static otherwise crash
+  bool newConnection = false;
+  bool isConnected = false;
 
   SysModules();
 
@@ -35,4 +35,4 @@ private:
   // unsigned long tenSecondMillis = millis() - 4500;
 };
 
-static SysModules *mdls;
+extern SysModules *mdls;

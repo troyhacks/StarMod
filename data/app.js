@@ -3,12 +3,15 @@
 // @date      20240114
 // @repo      https://github.com/ewowi/StarMod
 // @Authors   https://github.com/ewowi/StarMod/commits/main
-// @Copyright (c) 2024 Github StarMod Commit Authors
+// @Copyright © 2024 Github StarMod Commit Authors
 // @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 // @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 
-function userFun(data) {
-  let buffer = new Uint8Array(data);
+function appName() {
+  return "Led";
+}
+
+function userFun(buffer) {
   if (buffer[0]==1 && jsonValues.pview) {
     let pviewNode = gId("pview");
 
@@ -38,11 +41,6 @@ function userFun(data) {
       preview3D(pviewNode, buffer);
 
     return true;
-  }
-  else if (buffer[0]==0) {
-    let pviewNode = gId("board");
-    // console.log(buffer, pviewNode);
-    previewBoard(pviewNode, buffer);
   }
   return false;
 }
@@ -186,6 +184,7 @@ function preview3D(canvasNode, buffer) {
 
         gId("canvasButton1").innerText = "Set Start position";
         gId("canvasButton2").innerText = "Set End position";
+        gId("canvasButton3").innerText = "Set Mid position";
 
         //process canvas button click
         gId("canvasButton1").addEventListener("click", function(){
@@ -198,6 +197,12 @@ function preview3D(canvasNode, buffer) {
         gId("canvasButton2").addEventListener("click", function(){
           var command = {};
           command["canvasData"] = "end:" + gId("canvasData").innerText;
+          requestJson(command);
+          gId("canvasMenu").style.display = "none";
+        }, false);
+        gId("canvasButton3").addEventListener("click", function(){
+          var command = {};
+          command["canvasData"] = "mid:" + gId("canvasData").innerText;
           requestJson(command);
           gId("canvasMenu").style.display = "none";
         }, false);
@@ -283,9 +288,10 @@ function preview3D(canvasNode, buffer) {
       }
 
       // controls.rotateSpeed = 0.4;
-      scene.rotation.x = buffer[1];
-      scene.rotation.y = buffer[2];
-      scene.rotation.z = buffer[3];
+      //moving heads rotation
+      scene.rotation.x = buffer[1] / 255 * Math.PI * 2;
+      scene.rotation.y = buffer[2] / 255 * Math.PI * 2;
+      scene.rotation.z = buffer[3] / 255 * Math.PI * 2;
 
       controls.update(); // apply orbit controls
 
@@ -320,23 +326,3 @@ function preview3D(canvasNode, buffer) {
     }); //import OrbitControl
   }); //import Three
 } //preview3D
-
-function previewBoard(canvasNode, buffer) {
-  let ctx = canvasNode.getContext('2d');
-  //assuming 20 pins
-  let mW = 10; // matrix width
-  let mH = 2; // matrix height
-  let pPL = Math.min(canvasNode.width / mW, canvasNode.height / mH); // pixels per LED (width of circle)
-  let lOf = Math.floor((canvasNode.width - pPL*mW)/2); //left offeset (to center matrix)
-  let i = 5;
-  ctx.clearRect(0, 0, canvasNode.width, canvasNode.height);
-  for (let y=0.5;y<mH;y++) for (let x=0.5; x<mW; x++) {
-    if (buffer[i] + buffer[i+1] + buffer[i+2] > 20) { //do not show nearly blacks
-      ctx.fillStyle = `rgb(${buffer[i]},${buffer[i+1]},${buffer[i+2]})`;
-      ctx.beginPath();
-      ctx.arc(x*pPL+lOf, y*pPL, pPL*0.4, 0, 2 * Math.PI);
-      ctx.fill();
-    }
-    i+=3;
-  }
-}

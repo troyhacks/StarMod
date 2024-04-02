@@ -1,10 +1,10 @@
 /*
    @title     StarMod
    @file      SysModUI.cpp
-   @date      20240114
+   @date      20240228
    @repo      https://github.com/ewowi/StarMod
    @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright (c) 2024 Github StarMod Commit Authors
+   @Copyright © 2024 Github StarMod Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
@@ -13,13 +13,6 @@
 #include "SysModWeb.h"
 #include "SysModModel.h"
 
-//init static variables (https://www.tutorialspoint.com/cplusplus/cpp_static_members.htm)
-std::vector<VarFun> SysModUI::varFunctions;
-std::vector<VarLoop> SysModUI::loopFunctions;
-int SysModUI::varCounter = 1; //start with 1 so it can be negative, see var["o"]
-bool SysModUI::stageVarChanged = false;
-uint8_t SysModUI::parentRowNr = UINT8_MAX;
-
 SysModUI::SysModUI() :SysModule("UI") {
 };
 
@@ -27,10 +20,9 @@ SysModUI::SysModUI() :SysModule("UI") {
 void SysModUI::setup() {
   SysModule::setup();
 
-  parentVar = initSysMod(parentVar, name);
-  if (parentVar["o"] > -1000) parentVar["o"] = -4100; //set default order. Don't use auto generated order as order can be changed in the ui (WIP)
+  parentVar = initSysMod(parentVar, name, 4101);
 
-  JsonObject tableVar = initTable(parentVar, "vlTbl", nullptr, true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  JsonObject tableVar = initTable(parentVar, "vlTbl", nullptr, true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_UIFun:
       ui->setLabel(var, "Variable loops");
       ui->setComment(var, "Loops initiated by a variable");
@@ -38,9 +30,9 @@ void SysModUI::setup() {
     default: return false;
   }});
 
-  initText(tableVar, "vlVar", nullptr, 32, true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  initText(tableVar, "vlVar", nullptr, 32, true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_ValueFun:
-      for (uint8_t rowNr = 0; rowNr < loopFunctions.size(); rowNr++)
+      for (forUnsigned8 rowNr = 0; rowNr < loopFunctions.size(); rowNr++)
         mdl->setValue(var, JsonString(loopFunctions[rowNr].var["id"], JsonString::Copied), rowNr);
       return true;
     case f_UIFun:
@@ -49,9 +41,9 @@ void SysModUI::setup() {
     default: return false;
   }});
 
-  initNumber(tableVar, "vlLoopps", UINT16_MAX, 0, 999, true, [](JsonObject var, uint8_t rowNr, uint8_t funType) { switch (funType) { //varFun
+  initNumber(tableVar, "vlLoopps", UINT16_MAX, 0, 999, true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
     case f_ValueFun:
-      for (uint8_t rowNr = 0; rowNr < loopFunctions.size(); rowNr++)
+      for (forUnsigned8 rowNr = 0; rowNr < loopFunctions.size(); rowNr++)
         mdl->setValue(var, loopFunctions[rowNr].counter, rowNr);
       return true;
     case f_UIFun:
@@ -64,13 +56,13 @@ void SysModUI::setup() {
 void SysModUI::loop() {
   // SysModule::loop();
 
-  for (auto varLoop = begin (loopFunctions); varLoop != end (loopFunctions); ++varLoop) {
-    if (millis() - varLoop->lastMillis >= varLoop->var["interval"].as<int>()) {
-      varLoop->lastMillis = millis();
+  for (VarLoop &varLoop : loopFunctions) {
+    if (millis() - varLoop.lastMillis >= varLoop.var["interval"].as<int>()) {
+      varLoop.lastMillis = millis();
 
-      varLoop->loopFun(varLoop->var, 1, f_LoopFun); //rowNr..
+      varLoop.loopFun(varLoop.var, 1, f_LoopFun); //rowNr..
 
-      varLoop->counter++;
+      varLoop.counter++;
       // USER_PRINTF("%s %u %u %d %d\n", varLoop->mdl->varID(var), varLoop->lastMillis, millis(), varLoop->interval, varLoop->counter);
     }
   }
@@ -79,8 +71,8 @@ void SysModUI::loop() {
 void SysModUI::loop1s() {
   //if something changed in vloops
   ui->callVarFun("vlLoopps", UINT8_MAX, f_ValueFun);
-  for (auto varLoop = begin (loopFunctions); varLoop != end (loopFunctions); ++varLoop)
-    varLoop->counter = 0;
+  for (VarLoop &varLoop : loopFunctions)
+    varLoop.counter = 0;
 }
 
 JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * type, bool readOnly, VarFun varFun) {
@@ -105,7 +97,7 @@ JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * ty
       var = parent["n"].add<JsonObject>();
       // serializeJson(model, Serial);Serial.println();
     }
-    var["id"] = (char *)id; //JsonString(id, JsonString::Copied);
+    var["id"] = JsonString(id, JsonString::Copied);
   }
   // else {
   //   USER_PRINTF("initVar Var %s->%s already defined\n", modelParentId, id);
@@ -113,22 +105,13 @@ JsonObject SysModUI::initVar(JsonObject parent, const char * id, const char * ty
 
   if (!var.isNull()) {
     if (var["type"].isNull() || var["type"] != type) {
-      var["type"] = (char *)type;//JsonString(type, JsonString::Copied);
+      var["type"] = JsonString(type, JsonString::Copied);
       print->printJson("initVar set type", var);
     }
 
-    if (var["ro"] != readOnly) var["ro"] = readOnly;
+    if (var["ro"].isNull() || mdl->varRO(var) != readOnly) mdl->varRO(var, readOnly);
 
-    //set order. make order negative to check if not obsolete, see cleanUpModel
-    if (mdl->varOrder(var) >= 1000) //predefined! (modules)
-      mdl->varOrder(var, -mdl->varOrder(var)); //leave the order as is
-    else {
-      if (mdl->varOrder(parent) >= 0) // if checks on the parent already done so vars added later, e.g. controls, will be autochecked
-        mdl->varOrder(var, varCounter++); //redefine order
-      else
-        mdl->varOrder(var, -varCounter++); //redefine order
-    }
-
+    mdl->varInitOrder(parent, var);
 
     //if varFun, add it to the list
     if (varFun) {
@@ -176,20 +159,33 @@ void SysModUI::processJson(JsonVariant json) {
       JsonVariant value = pair.value();
 
       // commands
-      if (pair.key() == "view" || pair.key() == "canvasData" || pair.key() == "theme") { //save the chosen view in System (see index.js)
+      if (pair.key() == "v") { //when called from jsonHandler
+        // do nothing as it is no real var but the verbose command of WLED
+        USER_PRINTF("processJson v type %s\n", pair.value().as<String>().c_str());
+      }
+      else if (pair.key() == "view" || pair.key() == "canvasData" || pair.key() == "theme") { //save the chosen view in System (see index.js)
         JsonObject var = mdl->findVar("System");
         USER_PRINTF("processJson %s v:%s n: %d s:%s\n", pair.key().c_str(), pair.value().as<String>().c_str(), var.isNull(), mdl->varID(var));
-        var[JsonString(key, JsonString::Copied)] = JsonString(value, JsonString::Copied);
+        var[JsonString(key, JsonString::Copied)] = JsonString(value, JsonString::Copied); //this is needed as key can become a dangling pointer
         // json.remove(key); //key should stay as all clients use this to perform the changeHTML action
       }
       else if (pair.key() == "addRow" || pair.key() == "delRow") {
         if (value.is<JsonObject>()) {
           JsonObject command = value;
           JsonObject var = mdl->findVar(command["id"]);
-          USER_PRINTF("processJson %s - %s\n", key, value.as<String>().c_str());
+          stackUnsigned8 rowNr = command["rowNr"];
+          USER_PRINTF("processJson %s - %s [%d]\n", key, value.as<String>().c_str(), rowNr);
 
-          if (callVarFun(var, command["rowNr"], pair.key() == "addRow"?f_AddRow:f_DelRow))
+          //first remove the deleted row both on server and on client(s)
+          if (pair.key() == "delRow") {
+            mdl->varRemoveValuesForRow(var, rowNr);
+            print->printJson("deleted rows", var);
+            web->sendResponseObject(); //async response //trigger receiveData->delRow
+          }
+
+          if (callVarFun(var, rowNr, pair.key() == "addRow"?f_AddRow:f_DelRow)) {
             web->sendResponseObject(); //async response
+          }
         }
         json.remove(key); //key processed we don't need the key in the response
       }
@@ -223,7 +219,7 @@ void SysModUI::processJson(JsonVariant json) {
           key = rowNrC;
           rowNrC = strtok(NULL, " ");
         }
-        uint8_t rowNr = rowNrC?atoi(rowNrC):UINT8_MAX;
+        stackUnsigned8 rowNr = rowNrC?atoi(rowNrC):UINT8_MAX;
 
         JsonObject var = mdl->findVar(key);
 
@@ -234,6 +230,7 @@ void SysModUI::processJson(JsonVariant json) {
           //a button never sets the value
           if (var["type"] == "button") { //button always
             ui->callVarFun(var, rowNr, f_ChangeFun);
+            if (rowNr != UINT8_MAX) web->getResponseObject()[mdl->varID(var)]["rowNr"] = rowNr;
           }
           else {
             if (newValue.is<const char *>())
