@@ -1,10 +1,10 @@
 /*
-   @title     StarMod
+   @title     StarBase
    @file      SysModFiles.cpp
-   @date      20240228
-   @repo      https://github.com/ewowi/StarMod
-   @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright © 2024 Github StarMod Commit Authors
+   @date      20240411
+   @repo      https://github.com/ewowi/StarBase, submit changes to this file as PRs to ewowi/StarBase
+   @Authors   https://github.com/ewowi/StarBase/commits/main
+   @Copyright © 2024 Github StarBase Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
@@ -19,89 +19,86 @@
 
 SysModFiles::SysModFiles() :SysModule("Files") {
   if (!LittleFS.begin(true)) { //true: formatOnFail
-    USER_PRINTF(" An Error has occurred while mounting File system");
-    USER_PRINTF(" fail\n");
+    ppf(" An Error has occurred while mounting File system");
+    ppf(" fail\n");
     success = false;
   }
 };
 
-//setup filesystem
 void SysModFiles::setup() {
   SysModule::setup();
   parentVar = ui->initSysMod(parentVar, name, 2101);
 
   JsonObject tableVar = ui->initTable(parentVar, "fileTbl", nullptr, false, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_UIFun:
+    case onUI:
       ui->setLabel(var, "Files");
       ui->setComment(var, "List of files");
       return true;
-    case f_AddRow:
+    case onAddRow:
       rowNr = fileList.size();
-      USER_PRINTF("chFun addRow %s[%d] = %s\n", mdl->varID(var), rowNr, var["value"].as<String>().c_str());
       web->getResponseObject()["addRow"]["rowNr"] = rowNr;
       //add a row with all defaults
       return true;
-    case f_DelRow:
+    case onDeleteRow:
       if (rowNr != UINT8_MAX && rowNr < fileList.size()) {
         const char * fileName = fileList[rowNr].name;
-        USER_PRINTF("chFun delRow %s[%d] = %s %s\n", mdl->varID(var), rowNr, var["value"].as<String>().c_str(), fileName);
+        // ppf("fileTbl delRow %s[%d] = %s %s\n", mdl->varID(var), rowNr, var["value"].as<String>().c_str(), fileName);
         this->removeFiles(fileName, false);
+
+        // print->printVar(var);
+        // ppf("\n");
       }
-      print->printJson(" ", var);
       return true;
     default: return false;
   }});
 
   ui->initText(tableVar, "flName", nullptr, 32, true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_ValueFun:
+    case onSetValue:
       for (forUnsigned8 rowNr = 0; rowNr < fileList.size(); rowNr++)
         mdl->setValue(var, JsonString(fileList[rowNr].name, JsonString::Copied), rowNr);
       return true;
-    case f_UIFun:
+    case onUI:
       ui->setLabel(var, "Name");
       return true;
     default: return false;
   }});
 
   ui->initNumber(tableVar, "flSize", UINT16_MAX, 0, UINT16_MAX, true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_ValueFun:
+    case onSetValue:
       for (forUnsigned8 rowNr = 0; rowNr < fileList.size(); rowNr++)
         mdl->setValue(var, fileList[rowNr].size, rowNr);
       return true;
-    case f_UIFun:
+    case onUI:
       ui->setLabel(var, "Size (B)");
       return true;
     default: return false;
   }});
 
   ui->initURL(tableVar, "flLink", nullptr, true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_ValueFun:
+    case onSetValue:
       for (forUnsigned8 rowNr = 0; rowNr < fileList.size(); rowNr++) {
         char urlString[32] = "file/";
         strncat(urlString, fileList[rowNr].name, sizeof(urlString)-1);
         mdl->setValue(var, JsonString(urlString, JsonString::Copied), rowNr);
       }
       return true;
-    case f_UIFun:
+    case onUI:
       ui->setLabel(var, "Show");
       return true;
     default: return false;
   }});
 
   ui->initFile(parentVar, "upload", nullptr, UINT16_MAX, false, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_UIFun:
+    case onUI:
       ui->setLabel(var, "Upload File");
     default: return false;
   }});
 
-  ui->initProgress(parentVar, "drsize", UINT16_MAX, 0, files->totalBytes(), true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_ValueFun:
-      mdl->setValue(var, files->usedBytes());
-      return true;
-    case f_UIFun:
+  ui->initProgress(parentVar, "drsize", files->usedBytes(), 0, files->totalBytes(), true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+    case onUI:
       ui->setLabel(var, "FS Size");
       return true;
-    case f_ChangeFun:
+    case onChange:
       var["max"] = files->totalBytes(); //makes sense?
       web->addResponseV(var["id"], "comment", "%d / %d B", files->usedBytes(), files->totalBytes());
       return true;
@@ -110,8 +107,7 @@ void SysModFiles::setup() {
 
 }
 
-void SysModFiles::loop() {
-  // SysModule::loop();
+void SysModFiles::loop20ms() {
 
   if (filesChanged) {
     filesChanged = false;
@@ -131,19 +127,19 @@ void SysModFiles::loop() {
     }
     root.close();
 
-    ui->callVarFun(mdl->findVar("drsize")); //valueFun
+    mdl->setValue("drsize", files->usedBytes());
 
     for (JsonObject childVar: mdl->varChildren("fileTbl"))
-      ui->callVarFun(childVar, UINT8_MAX, f_ValueFun);
+      ui->callVarFun(childVar, UINT8_MAX, onSetValue); //set the value (WIP)
   }
 }
 
 void SysModFiles::loop10s() {
-  ui->callVarFun(mdl->findVar("drsize"));
+  mdl->setValue("drsize", files->usedBytes());
 }
 
 bool SysModFiles::remove(const char * path) {
-  USER_PRINTF("File remove %s\n", path);
+  ppf("File remove %s\n", path);
   return LittleFS.remove(path);
   filesChanged = true;
 }
@@ -179,7 +175,7 @@ void SysModFiles::dirToJson(JsonArray array, bool nameOnly, const char * filter)
         strncat(urlString, file.name(), sizeof(urlString)-1);
         row.add(JsonString(urlString, JsonString::Copied));
       }
-      // USER_PRINTF("FILE: %s %d\n", file.name(), file.size());
+      // ppf("FILE: %s %d\n", file.name(), file.size());
     }
 
     file.close();
@@ -189,25 +185,27 @@ void SysModFiles::dirToJson(JsonArray array, bool nameOnly, const char * filter)
   root.close();
 }
 
-bool SysModFiles::seqNrToName(char * fileName, size_t seqNr) {
+bool SysModFiles::seqNrToName(char * fileName, size_t seqNr, const char * filter) {
 
   File root = LittleFS.open("/");
   File file = root.openNextFile();
 
   size_t counter = 0;
   while (file) {
-    if (counter == seqNr) {
-      USER_PRINTF("seqNrToName: %s %d\n", file.name(), file.size());
-      root.close();
-      strncat(fileName, "/", 31); //add root prefix, fileName is 32 bytes but sizeof doesn't know so cheating
-      strncat(fileName, file.name(), 31);
-      file.close();
-      return true;
+    if (filter == nullptr || strstr(file.name(), filter) != nullptr) {
+      if (counter == seqNr) {
+        // ppf("seqNrToName: %d %s %d\n", seqNr, file.name(), file.size());
+        root.close();
+        strncat(fileName, "/", 31); //add root prefix, fileName is 32 bytes but sizeof doesn't know so cheating
+        strncat(fileName, file.name(), 31);
+        file.close();
+        return true;
+      }
+      counter++;
     }
 
     file.close();
     file = root.openNextFile();
-    counter++;
   }
 
   root.close();
@@ -218,15 +216,15 @@ bool SysModFiles::readObjectFromFile(const char* path, JsonDocument* dest) {
   // if (doCloseFile) closeFile();
   File f = open(path, "r");
   if (!f) {
-    USER_PRINTF("File %s open not successful\n", path);
+    ppf("File %s open not successful\n", path);
     return false;
   }
   else { 
-    USER_PRINTF(PSTR("File %s open to read, size %d bytes\n"), path, (int)f.size());
-    DeserializationError error = deserializeJson(*dest, f, DeserializationOption::NestingLimit(20)); //StarMod requires more then 10
+    ppf("File %s open to read, size %d bytes\n", path, (int)f.size());
+    DeserializationError error = deserializeJson(*dest, f, DeserializationOption::NestingLimit(20)); //StarBase requires more then 10
     if (error) {
       print->printJDocInfo("readObjectFromFile", *dest);
-      USER_PRINTF("readObjectFromFile deserializeJson failed with code %s\n", error.c_str());
+      ppf("readObjectFromFile deserializeJson failed with code %s\n", error.c_str());
       f.close();
       return false;
     } else {
@@ -236,7 +234,7 @@ bool SysModFiles::readObjectFromFile(const char* path, JsonDocument* dest) {
   }
 }
 
-//candidate for deletion as taken over by StarModJson
+//candidate for deletion as taken over by StarJson
 // bool SysModFiles::writeObjectToFile(const char* path, JsonDocument* dest) {
 //   File f = open(path, "w");
 //   if (f) {
@@ -269,20 +267,4 @@ void SysModFiles::removeFiles(const char * filter, bool reverse) {
   }
 
   root.close();
-}
-
-bool SysModFiles::readFile(const char * path) {
-  File f = open(path, "r");
-  if (f) {
-
-    while(f.available()) {
-      Serial.print((char)f.read());
-    }
-    Serial.println();
-
-    f.close();
-    return true;
-  }
-  else 
-    return false;
 }

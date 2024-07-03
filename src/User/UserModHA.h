@@ -1,18 +1,18 @@
 /*
-   @title     StarMod
+   @title     StarBase
    @file      UserModHA.h
-   @date      20240114
-   @repo      https://github.com/ewowi/StarMod
-   @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright © 2024 Github StarMod Commit Authors
+   @date      20240411
+   @repo      https://github.com/ewowi/StarBase, submit changes to this file as PRs to ewowi/StarBase
+   @Authors   https://github.com/ewowi/StarBase/commits/main
+   @Copyright © 2024 Github StarBase Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
 
 #include <ArduinoHA.h>
 
-#define BROKER_ADDR     IPAddress(192,168,178,42) //ewowi: could we scan that instead of hard coded?
-
+// Basic example of MQTT connectivity to Home Assistant.
+// Add HALight, HASelect etc as required
 class UserModHA:public SysModule {
 
 public:
@@ -21,69 +21,68 @@ public:
     isEnabled = false;
   };
 
-  void onStateCommand(bool state, HALight* sender) {
-      Serial.print("State: ");
-      Serial.println(state);
+  void setup() override {
+    SysModule::setup();
 
-      sender->setState(state); // report state back to the Home Assistant
+    parentVar = ui->initUserMod(parentVar, name, 6300);
+
+    ui->initText(parentVar, "mqttAddr");
+    ui->initText(parentVar, "mqttUser");
+    ui->initText(parentVar, "mqttPass");
   }
 
-  void onBrightnessCommand(unsigned8 brightness, HALight* sender) {
-      Serial.print("Brightness: ");
-      Serial.println(brightness);
-
-      sender->setBrightness(brightness); // report brightness back to the Home Assistant
-  }
-
-  void onRGBColorCommand(HALight::RGBColor color, HALight* sender) {
-      Serial.print("Red: ");
-      Serial.println(color.red);
-      Serial.print("Green: ");
-      Serial.println(color.green);
-      Serial.print("Blue: ");
-      Serial.println(color.blue);
-
-      sender->setRGBColor(color); // report color back to the Home Assistant
-  }
 
   void connectedChanged() {
+    ppf("connectedChanged\n");
     if (mdls->isConnected) {
       // set device's details (optional)
-      device.setName("StarMod");
-      device.setSoftwareVersion("0.0.1");
+      device.setName(mdl->getValue("instance"));
+      device.setSoftwareVersion(_INIT(TOSTRING(VERSION)));
+   }
+
+    byte mac[6];
+    WiFi.macAddress(mac);
+    device.setUniqueId(mac, sizeof(mac));
+
+    String mqttAddr = mdl->getValue("mqttAddr");
+    String mqttUser = mdl->getValue("mqttUser");
+    if(mqttUser == "null" || mqttUser == nullptr) mqttUser = "";
+    String mqttPass = mdl->getValue("mqttPass");
+    if(mqttPass == "null" || mqttPass == nullptr) mqttPass = "";
+
+    IPAddress ip;
+    if(ip.fromString(mqttAddr)) {
+      if(mqttUser == "") {
+        ppf("mqtt->begin('%s')\n", mqttAddr.c_str());
+        mqtt->begin(ip);
+      }
+      else {
+        ppf("WARNING - untested mqtt->begin('%s', '%s', pass)\n", mqttAddr.c_str(), mqttUser.c_str());
+        mqtt->begin(ip, mqttUser.c_str(), mqttPass.c_str());  
+      }
+      started = true;
+    }
+    else {
+      ppf("Failed to parse %s to IP\n", mqttAddr.c_str());
     }
 
-    // configure light (optional)
-    light->setName("LEDs");
-
-    // Optionally you can set retain flag for the HA commands
-    // light.setRetain(true);
-
-    // Maximum brightness level can be changed as follows:
-    // light.setBrightnessScale(50);
-
-    // Optionally you can enable optimistic mode for the HALight.
-    // In this mode you won't need to report state back to the HA when commands are executed.
-    // light.setOptimistic(true);
-
-    // handle light states
-    light->onStateCommand(onStateCommand);
-    light->onBrightnessCommand(onBrightnessCommand); // optional
-    light->onRGBColorCommand(onRGBColorCommand); // optional
-
-    mqtt->begin(BROKER_ADDR);
   }
 
-  void loop() {
-    // SysModule::loop();
+  void loop20ms() override {
     mqtt->loop();
+  }
+
+  void loop10s() override {
+    if(!started) return;
+    testSensor->setValue((uint32_t) (millis() / 1000));
   }
 
   private:
     WiFiClient client;
     HADevice device;
     HAMqtt* mqtt = new HAMqtt(client, device);
-    HALight* light = new HALight("starmod", HALight::BrightnessFeature | HALight::RGBFeature);
+    HASensorNumber* testSensor = new HASensorNumber("uptime");
+    bool started = false;
 };
 
 extern UserModHA *hamod;

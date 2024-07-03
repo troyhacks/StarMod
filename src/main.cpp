@@ -1,21 +1,13 @@
 /*
-   @title     StarMod
+   @title     StarBase
    @file      main.cpp
-   @date      20240114
-   @repo      https://github.com/ewowi/StarMod
-   @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright © 2024 Github StarMod Commit Authors
+   @date      20240411
+   @repo      https://github.com/ewowi/StarBase, submit changes to this file as PRs to ewowi/StarBase
+   @Authors   https://github.com/ewowi/StarBase/commits/main
+   @Copyright © 2024 Github StarBase Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
-
-// remove latest commit
-// git reset --hard HEAD^
-// git push origin -f
-
-#warning ******************************************************************************************************************************
-#warning ********** STARMOD IS LICENSED UNDER GPL-V3. BY INSTALLING STARMOD YOU IMPLICITLY ACCEPT THE TERMS AND CONDITIONS  ********
-#warning ******************************************************************************************************************************
 
 #include "SysModule.h"
 #include "SysModules.h"
@@ -27,7 +19,7 @@
 #include "Sys/SysModModel.h"
 #include "Sys/SysModNetwork.h"
 #include "Sys/SysModPins.h"
-#include "User/UserModInstances.h"
+#include "Sys/SysModInstances.h"
 #include "User/UserModMDNS.h"
 SysModules *mdls;
 SysModPrint *print;
@@ -37,43 +29,32 @@ SysModSystem *sys;
 SysModFiles *files;
 SysModModel *mdl;
 SysModNetwork *net;
-SysModPins *pins;
-UserModInstances *instances;
+SysModPins *pinsM;
+SysModInstances *instances;
 UserModMDNS *mdns;
-#ifdef STARMOD_APPMOD_LEDS
-  #include "App/LedModEffects.h"
-  #include "App/LedModFixture.h"
-  #include "App/LedModFixtureGen.h"
-  LedModFixture *fix;
-  LedModFixtureGen *lfg;
-  LedModEffects *eff;
-  #ifdef STARMOD_USERMOD_ARTNET
-    #include "User/UserModArtNet.h"
-    UserModArtNet *artnetmod;
-  #endif
-  #ifdef STARMOD_USERMOD_DDP
-    #include "User/UserModDDP.h"
-    UserModDDP *ddpmod;
-  #endif
-#endif
-#ifdef STARMOD_USERMOD_E131
+
+#include "App/AppModDemo.h"
+AppModDemo *appModDemo;
+
+#ifdef STARBASE_USERMOD_E131
   #include "User/UserModE131.h"
   UserModE131 *e131mod;
 #endif
-#ifdef STARMOD_USERMOD_HA
+#ifdef STARBASE_USERMOD_HA
   #include "User/UserModHA.h"
   UserModHA *hamod;
 #endif
-#ifdef STARMOD_USERMOD_WLEDAUDIO
-  #include "User/UserModWLEDAudio.h"
-  UserModWLEDAudio *wledAudioMod;
+#ifdef STARBASE_USERMOD_MPU6050
+  #include "User/UserModMPU6050.h"
+  UserModMPU6050 *mpu6050;
+#endif
+#ifdef STARBASE_USERMOD_LIVE
+  #include "User/UserModLive.h"
+  UserModLive *liveM;
 #endif
 
 //setup all modules
 void setup() {
-  // pinMode(LED_BUILTIN, OUTPUT);
-  // digitalWrite(LED_BUILTIN, HIGH);
-
   mdls = new SysModules();
   
   print = new SysModPrint();
@@ -83,70 +64,54 @@ void setup() {
   web = new SysModWeb();
   ui = new SysModUI();
   sys = new SysModSystem();
-  pins = new SysModPins();
-  instances = new UserModInstances();
+  pinsM = new SysModPins();
+  instances = new SysModInstances();
   mdns = new UserModMDNS();
-  #ifdef STARMOD_APPMOD_LEDS
-    eff= new LedModEffects();
-    fix = new LedModFixture();
-    lfg = new LedModFixtureGen();
-    #ifdef STARMOD_USERMOD_ARTNET
-      artnetmod = new UserModArtNet();
-    #endif
-    #ifdef STARMOD_USERMOD_DDP
-      ddpmod = new UserModDDP();
-    #endif
-  #endif
-  #ifdef STARMOD_USERMOD_E131
+  appModDemo = new AppModDemo();
+  #ifdef STARBASE_USERMOD_E131
     e131mod = new UserModE131();
   #endif
-  #ifdef STARMOD_USERMOD_HA
+  #ifdef STARBASE_USERMOD_HA
     hamod = new UserModHA();
   #endif
-  #ifdef STARMOD_USERMOD_WLEDAUDIO
-    wledAudioMod = new UserModWLEDAudio();
+  #ifdef STARBASE_USERMOD_MPU6050
+    mpu6050 = new UserModMPU6050();
+  #endif
+  #ifdef STARBASE_USERMOD_LIVE
+    liveM = new UserModLive();
   #endif
 
   //Reorder with care! this is the order in which setup and loop is executed
   //If changed make sure mdlEnabled.chFun executes var["value"].to<JsonArray>(); and saveModel! 
   //Default: add below, not in between
-  #ifdef STARMOD_APPMOD_LEDS
-    mdls->add(fix);
-    mdls->add(eff);
-    mdls->add(lfg);
-  #endif
+
+  mdls->add(appModDemo);
+
   mdls->add(files);
   mdls->add(sys);
-  mdls->add(pins);
+  mdls->add(pinsM);
   mdls->add(print);
   mdls->add(web);
   mdls->add(net);
-  #ifdef STARMOD_APPMOD_LEDS
-    #ifdef STARMOD_USERMOD_DDP
-      mdls->add(ddpmod);
-    #endif
-    #ifdef STARMOD_USERMOD_ARTNET
-      mdls->add(artnetmod);
-    #endif
-  #endif
-  #ifdef STARMOD_USERMOD_E131
+  #ifdef STARBASE_USERMOD_E131
     mdls->add(e131mod);
   #endif
-  #ifdef STARMOD_USERMOD_HA
+  #ifdef STARBASE_USERMOD_HA
     mdls->add(hamod); //no ui
+  #endif
+  #ifdef STARBASE_USERMOD_MPU6050
+    mdls->add(mpu6050);
   #endif
   mdls->add(mdl);
   mdls->add(ui);
-  #ifdef STARMOD_USERMOD_WLEDAUDIO
-    mdls->add(wledAudioMod); //no ui
-  #endif
   mdls->add(mdns); //no ui
   mdls->add(instances);
+  #ifdef STARBASE_USERMOD_LIVE
+    mdls->add(liveM);
+  #endif
 
   //do not add mdls itself as it does setup and loop for itself!!! (it is the orchestrator)
   mdls->setup();
-
-  // digitalWrite(LED_BUILTIN, LOW);
 }
 
 //loop all modules

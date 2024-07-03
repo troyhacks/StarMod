@@ -1,10 +1,10 @@
 /*
-   @title     StarMod
+   @title     StarBase
    @file      SysModSystem.cpp
-   @date      20240114
-   @repo      https://github.com/ewowi/StarMod
-   @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright © 2024 Github StarMod Commit Authors
+   @date      20240411
+   @repo      https://github.com/ewowi/StarBase, submit changes to this file as PRs to ewowi/StarBase
+   @Authors   https://github.com/ewowi/StarBase/commits/main
+   @Copyright © 2024 Github StarBase Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
@@ -14,6 +14,8 @@
 #include "SysModUI.h"
 #include "SysModWeb.h"
 #include "SysModModel.h"
+#include "SysModNetwork.h"
+#include "User/UserModMDNS.h"
 
 // #include <Esp.h>
 
@@ -39,23 +41,44 @@ void SysModSystem::setup() {
   parentVar = ui->initSysMod(parentVar, name, 2000);
   parentVar["s"] = true; //setup
 
-  ui->initText(parentVar, "instanceName", "StarMod", 32, false, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_UIFun:
-      ui->setLabel(var, "Name");
+  ui->initText(parentVar, "name", _INIT(TOSTRING(APP)), 24, false, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+    case onUI:
+      // ui->setLabel(var, "Name");
       ui->setComment(var, "Instance name");
+      return true;
+    case onChange:
+      char name[24];
+      removeInvalidCharacters(name, var["value"]);
+      ppf("instance name stripped %s\n", name);
+      mdl->setValue(mdl->varID(var), JsonString(name, JsonString::Copied)); //update with stripped name
+      mdns->resetMDNS(); // set the new name for mdns
       return true;
     default: return false;
   }});
 
   ui->initText(parentVar, "upTime", nullptr, 16, true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_UIFun:
+    case onUI:
       ui->setComment(var, "Uptime of board");
       return true;
     default: return false;
   }});
 
+  ui->initNumber(parentVar, "now", UINT16_MAX, 0, (unsigned long)-1, true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+    case onUI:
+      ui->setLabel(var, "now");
+      return true;
+    default: return false;
+  }});
+
+  ui->initNumber(parentVar, "timeBase", UINT16_MAX, 0, (unsigned long)-1, true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+    case onUI:
+      ui->setLabel(var, "TimeBase");
+      return true;
+    default: return false;
+  }});
+
   ui->initButton(parentVar, "reboot", false, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_ChangeFun:
+    case onChange:
       web->ws.closeAll(1012);
 
       // mdls->reboot(); //not working yet
@@ -71,14 +94,11 @@ void SysModSystem::setup() {
 
   ui->initText(parentVar, "loops", nullptr, 16, true);
 
-  print->fFormat(chipInfo, sizeof(chipInfo)-1, "%s %s c#:%d %d mHz f:%d KB %d mHz %d", ESP.getChipModel(), ESP.getSdkVersion(), ESP.getChipCores(), ESP.getCpuFreqMHz(), ESP.getFlashChipSize()/1024, ESP.getFlashChipSpeed()/1000000, ESP.getFlashChipMode());
+  print->fFormat(chipInfo, sizeof(chipInfo)-1, "%s %s (%d.%d.%d) c#:%d %d mHz f:%d KB %d mHz %d", ESP.getChipModel(), ESP.getSdkVersion(), ESP_ARDUINO_VERSION_MAJOR, ESP_ARDUINO_VERSION_MINOR, ESP_ARDUINO_VERSION_PATCH, ESP.getChipCores(), ESP.getCpuFreqMHz(), ESP.getFlashChipSize()/1024, ESP.getFlashChipSpeed()/1000000, ESP.getFlashChipMode());
   ui->initText(parentVar, "chip", chipInfo, 16, true);
 
-  ui->initProgress(parentVar, "heap", UINT16_MAX, 0, ESP.getHeapSize()/1000, true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_ValueFun:
-      mdl->setValue(var, (ESP.getHeapSize()-ESP.getFreeHeap()) / 1000);
-      return true;
-    case f_ChangeFun:
+  ui->initProgress(parentVar, "heap", (ESP.getHeapSize()-ESP.getFreeHeap()) / 1000, 0, ESP.getHeapSize()/1000, true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+    case onChange:
       var["max"] = ESP.getHeapSize()/1000; //makes sense?
       web->addResponseV(var["id"], "comment", "f:%d / t:%d (l:%d) B", ESP.getFreeHeap(), ESP.getHeapSize(), ESP.getMaxAllocHeap());
       return true;
@@ -86,11 +106,8 @@ void SysModSystem::setup() {
   }});
 
   if (psramFound()) {
-    ui->initProgress(parentVar, "psram", UINT16_MAX, 0, ESP.getPsramSize()/1000, true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-      case f_ValueFun:
-        mdl->setValue(var, (ESP.getPsramSize()-ESP.getFreePsram()) / 1000);
-        return true;
-      case f_ChangeFun:
+    ui->initProgress(parentVar, "psram", (ESP.getPsramSize()-ESP.getFreePsram()) / 1000, 0, ESP.getPsramSize()/1000, true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+      case onChange:
         var["max"] = ESP.getPsramSize()/1000; //makes sense?
         web->addResponseV(var["id"], "comment", "%d / %d (%d) B", ESP.getFreePsram(), ESP.getPsramSize(), ESP.getMinFreePsram());
         return true;
@@ -98,77 +115,78 @@ void SysModSystem::setup() {
     }});
   }
 
-  ui->initProgress(parentVar, "mainStack", UINT16_MAX, 0, getArduinoLoopTaskStackSize(), true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_ValueFun:
-      mdl->setValue(var, sysTools_get_arduino_maxStackUsage());
-      return true;
-    case f_UIFun:
+  ui->initProgress(parentVar, "mainStack", sysTools_get_arduino_maxStackUsage(), 0, getArduinoLoopTaskStackSize(), true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+    case onUI:
       ui->setLabel(var, "Main stack");
       return true;
-    case f_ChangeFun:
+    case onChange:
+      var["max"] = getArduinoLoopTaskStackSize(); //makes sense?
       web->addResponseV(var["id"], "comment", "%d of %d B", sysTools_get_arduino_maxStackUsage(), getArduinoLoopTaskStackSize());
       return true;
     default: return false;
   }});
 
-  ui->initProgress(parentVar, "tcpStack", UINT16_MAX, 0, CONFIG_ASYNC_TCP_TASK_STACK_SIZE, true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_ValueFun:
-      mdl->setValue(var, sysTools_get_webserver_maxStackUsage());
-      return true;
-    case f_UIFun:
+  ui->initProgress(parentVar, "tcpStack", sysTools_get_webserver_maxStackUsage(), 0, CONFIG_ASYNC_TCP_STACK_SIZE, true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+    case onUI:
       ui->setLabel(var, "TCP stack");
       return true;
-    case f_ChangeFun:
-      web->addResponseV(var["id"], "comment", "%d of %d B", sysTools_get_webserver_maxStackUsage(), CONFIG_ASYNC_TCP_TASK_STACK_SIZE);
+    case onChange:
+      web->addResponseV(var["id"], "comment", "%d of %d B", sysTools_get_webserver_maxStackUsage(), CONFIG_ASYNC_TCP_STACK_SIZE);
       return true;
     default: return false;
   }});
 
-  ui->initSelect(parentVar, "reset0", (int)rtc_get_reset_reason(0), true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_UIFun:
+  ui->initSelect(parentVar, "reset0", (int)rtc_get_reset_reason(0), true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+    case onUI:
       ui->setLabel(var, "Reset 0");
       ui->setComment(var, "Reason Core 0");
-      sys->addResetReasonsSelect(ui->setOptions(var));
+      addResetReasonsSelect(ui->setOptions(var));
       return true;
     default: return false;
   }});
 
   if (ESP.getChipCores() > 1)
-    ui->initSelect(parentVar, "reset1", (int)rtc_get_reset_reason(1), true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-      case f_UIFun:
+    ui->initSelect(parentVar, "reset1", (int)rtc_get_reset_reason(1), true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+      case onUI:
         ui->setLabel(var, "Reset 1");
         ui->setComment(var, "Reason Core 1");
-        sys->addResetReasonsSelect(ui->setOptions(var));
+        addResetReasonsSelect(ui->setOptions(var));
         return true;
       default: return false;
     }});
 
-  ui->initSelect(parentVar, "restartReason", (int)esp_reset_reason(), true, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_UIFun:
+  ui->initSelect(parentVar, "restartReason", (int)esp_reset_reason(), true, [this](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
+    case onUI:
       ui->setLabel(var, "Restart");
       ui->setComment(var, "Reason restart");
-      sys->addRestartReasonsSelect(ui->setOptions(var));
+      addRestartReasonsSelect(ui->setOptions(var));
       return true;
     default: return false;
   }});
 
   //calculate version in format YYMMDDHH
   //https://forum.arduino.cc/t/can-you-format-__date__/200818/10
-  int month, day, year, hour, minute, second;
-  const char month_names[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
-  sscanf(__DATE__, "%s %d %d", version, &day, &year); // Mon dd yyyy
-  month = (strstr(month_names, version)-month_names)/3+1;
-  sscanf(__TIME__, "%d:%d:%d", &hour, &minute, &second); //hh:mm:ss
-  print->fFormat(version, sizeof(version)-1, "%02d%02d%02d%02d", year-2000, month, day, hour);
+  // int month, day, year, hour, minute, second;
+  // const char month_names[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  // sscanf(__DATE__, "%s %d %d", version, &day, &year); // Mon dd yyyy
+  // month = (strstr(month_names, version)-month_names)/3+1;
+  // sscanf(__TIME__, "%d:%d:%d", &hour, &minute, &second); //hh:mm:ss
+  // print->fFormat(version, sizeof(version)-1, "%02d%02d%02d%02d", year-2000, month, day, hour);
 
-  USER_PRINTF("version %s %s %s %d:%d:%d\n", version, __DATE__, __TIME__, hour, minute, second);
+  // ppf("version %s %s %s %d:%d:%d\n", version, __DATE__, __TIME__, hour, minute, second);
 
-  ui->initText(parentVar, "version", version, 16, true);
+  strcat(build, _INIT(TOSTRING(APP)));
+  strcat(build, "_");
+  strcat(build, _INIT(TOSTRING(VERSION)));
+  strcat(build, "_");
+  strcat(build, _INIT(TOSTRING(PIOENV)));
+
+  ui->initText(parentVar, "build", build, 32, true);
   // ui->initText(parentVar, "date", __DATE__, 16, true);
   // ui->initText(parentVar, "time", __TIME__, 16, true);
 
   ui->initFile(parentVar, "update", nullptr, UINT16_MAX, false, [](JsonObject var, unsigned8 rowNr, unsigned8 funType) { switch (funType) { //varFun
-    case f_UIFun:
+    case onUI:
       ui->setLabel(var, "OTA Update");
       return true;
     default: return false;
@@ -193,25 +211,32 @@ void SysModSystem::setup() {
 }
 
 void SysModSystem::loop() {
-  // SysModule::loop();
-
   loopCounter++;
+  now = millis() + timebase;
 }
+
 void SysModSystem::loop1s() {
   mdl->setUIValueV("upTime", "%lu s", millis()/1000);
+  mdl->setUIValueV("now", "%lu s", now/1000);
+  mdl->setUIValueV("timeBase", "%lu s", (now<millis())? - (UINT32_MAX - timebase)/1000:timebase/1000);
   mdl->setUIValueV("loops", "%lu /s", loopCounter);
 
   loopCounter = 0;
 }
 void SysModSystem::loop10s() {
-  ui->callVarFun(mdl->findVar("heap"));
-  ui->callVarFun(mdl->findVar("mainStack"));
-  ui->callVarFun(mdl->findVar("tcpStack"));
+  mdl->setValue("heap", (ESP.getHeapSize()-ESP.getFreeHeap()) / 1000);
+  mdl->setValue("mainStack", sysTools_get_arduino_maxStackUsage());
+  mdl->setValue("tcpStack", sysTools_get_webserver_maxStackUsage());
 
   if (psramFound()) {
-    ui->callVarFun(mdl->findVar("psram"));
+    mdl->setValue("psram", (ESP.getPsramSize()-ESP.getFreePsram()) / 1000);
   }
-  USER_PRINTF("❤️"); //heartbeat
+
+  //heartbeat
+  if (millis() < 60000)
+    ppf("❤️ %s\n", WiFi.localIP().toString().c_str()); // show IP the first minute
+  else
+    ppf("❤️");
 }
 
 //replace code by sentence as soon it occurs, so we know what will happen and what not

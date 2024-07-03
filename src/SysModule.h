@@ -1,15 +1,20 @@
 /*
-   @title     StarMod
+   @title     StarBase
    @file      SysModule.h
-   @date      20240114
-   @repo      https://github.com/ewowi/StarMod
-   @Authors   https://github.com/ewowi/StarMod/commits/main
-   @Copyright © 2024 Github StarMod Commit Authors
+   @date      20240411
+   @repo      https://github.com/ewowi/StarBase, submit changes to this file as PRs to ewowi/StarBase
+   @Authors   https://github.com/ewowi/StarBase/commits/main
+   @Copyright © 2024 Github StarBase Commit Authors
    @license   GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
    @license   For non GPL-v3 usage, commercial licenses must be purchased. Contact moonmodules@icloud.com
 */
 
 #pragma once
+
+//make a string from pio variables (_INIT and STRINGIFY needed to make TOSTRING work)
+#define _INIT(x) x
+#define STRINGIFY(X) #X
+#define TOSTRING(X) STRINGIFY(X)
 
 //conventional (works)
 // #define unsigned8 uint8_t
@@ -55,6 +60,7 @@ public:
   const char * name;
   bool success;
   bool isEnabled;
+  unsigned long twentyMsMillis = millis() - random(1000); //random so not all 1s are fired at once
   unsigned long oneSecondMillis = millis() - random(1000); //random so not all 1s are fired at once
   unsigned long tenSecondMillis = millis() - random(10000); //random within a second
 
@@ -68,8 +74,9 @@ public:
 
   virtual void setup() {}
 
-  virtual void loop() {}
-  virtual void loop1s() {}
+  virtual void loop() {}//24000 fps if no load...
+  virtual void loop20ms() {} //50fps
+  virtual void loop1s() {} //1fps
   virtual void loop10s() {}
 
   virtual void reboot() {}
